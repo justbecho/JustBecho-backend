@@ -38,13 +38,52 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// CORS configuration - more specific
+// ✅ UPDATED CORS Configuration - Allow Vercel frontend
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://just-becho-frontend.vercel.app',
+  'https://justbecho.vercel.app',
+  'https://justbecho-frontend.vercel.app',
+  'https://just-becho.vercel.app',
+  'https://justbecho.com', // For future custom domain
+  'https://www.justbecho.com'
+];
+
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, etc.)
+    if (!origin) {
+      console.log('✅ No Origin - Allowing request');
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log(`✅ CORS Allowed: ${origin}`);
+      return callback(null, true);
+    } else {
+      console.log(`❌ CORS Blocked: ${origin}`);
+      
+      // For development/testing, allow all
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`⚠️ Development mode - Allowing ${origin}`);
+        return callback(null, true);
+      }
+      
+      // In production, only allow specific origins
+      const error = new Error(`CORS policy: Origin ${origin} not allowed`);
+      return callback(error, false);
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'Origin'],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  maxAge: 86400 // 24 hours
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -70,23 +109,36 @@ app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/cart", cartRoutes);
 
-// ❌ REMOVED: Seller routes (since seller verification is now in authController)
-// import sellerRoutes from "./routes/sellerRoutes.js";
-// app.use("/api/sellers", sellerRoutes);
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    cors: {
+      allowedOrigins: allowedOrigins,
+      environment: process.env.NODE_ENV || 'development'
+    }
+  });
+});
 
+// API Documentation endpoint
 app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API running...",
     timestamp: new Date().toISOString(),
     version: "1.0.0",
+    cors: {
+      allowedOrigins: allowedOrigins,
+      note: "Frontend should be hosted on one of these origins"
+    },
     routes: {
       auth: "/api/auth",
       products: "/api/products", 
       wishlist: "/api/wishlist",
       users: "/api/users",
       categories: "/api/categories",
-      cart: "/api/cart"
-      // ❌ REMOVED: sellers: "/api/sellers"
+      cart: "/api/cart",
+      health: "/api/health"
     }
   });
 });
@@ -96,13 +148,23 @@ app.use((req, res) => {
   console.log(`❌ 404 - Route not found: ${req.method} ${req.url}`);
   res.status(404).json({ 
     message: `Route ${req.method} ${req.url} not found`,
-    success: false
+    success: false,
+    allowedOrigins: allowedOrigins
   });
 });
 
 // Global error handling middleware
 app.use((error, req, res, next) => {
   console.error('💥 Global error handler:', error);
+  
+  // CORS errors
+  if (error.message.includes('CORS policy')) {
+    return res.status(403).json({ 
+      message: error.message,
+      success: false,
+      allowedOrigins: allowedOrigins
+    });
+  }
   
   // Multer errors
   if (error.code === 'LIMIT_FILE_SIZE') {
@@ -200,6 +262,9 @@ app.listen(PORT, () => {
   ✅ API URL: http://localhost:${PORT}
   ✅ Database: Connected ✅
 
+🌐 CORS CONFIGURATION:
+${allowedOrigins.map(origin => `  ✅ ${origin}`).join('\n')}
+
 🤖 TELEGRAM BOT STATUS:
   ✅ Bot Token: HARDCODED ✅
   🤖 Bot Name: Just Becho Bot
@@ -212,6 +277,7 @@ app.listen(PORT, () => {
   👤 Users:       http://localhost:${PORT}/api/users
   📁 Categories:  http://localhost:${PORT}/api/categories
   🛒  Cart:        http://localhost:${PORT}/api/cart
+  ❤️  Health:      http://localhost:${PORT}/api/health
 
 📁 UPLOADS DIRECTORY:
   ${path.join(__dirname, 'uploads')}
