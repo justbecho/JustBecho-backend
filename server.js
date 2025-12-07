@@ -1,284 +1,166 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from 'url';
+import mongoose from "mongoose";
 
-// STEP 1: Load env first
+// Load environment variables
 dotenv.config();
-
-// ✅ FIX: Hardcode Telegram Token
-process.env.TELEGRAM_BOT_TOKEN = "8478776735:AAGW_4rg8BeSy29xDLQrDCZA1pDolRxZUuk";
-console.log("✅ Telegram Token Hardcoded");
-
-// ✅ FIX: Hardcode MongoDB URI
-if (!process.env.MONGODB_URI) {
-  process.env.MONGODB_URI = "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/?appName=justbecho-cluster";
-}
-
-// STEP 2: Import DB connection
-import connectDB from "./config/db.js";
-
-// STEP 3: Connect DB first
-connectDB();
-
-// ES modules fix for __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 
 // ✅ CORS Configuration
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://just-becho-frontend.vercel.app',
-  'https://justbecho.vercel.app',
-  'https://justbecho-frontend.vercel.app',
-  'https://just-becho.vercel.app',
-  'https://justbecho.com',
-  'https://www.justbecho.com'
-];
-
 app.use(cors({
-  origin: allowedOrigins,
+  origin: [
+    'http://localhost:3000',
+    'https://just-becho-frontend.vercel.app',
+    'https://justbecho.vercel.app',
+    'https://justbecho-frontend.vercel.app',
+    'https://just-becho.vercel.app',
+    'https://justbecho.com',
+    'https://www.justbecho.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'Origin'],
-  exposedHeaders: ['Content-Length', 'Content-Type'],
-  maxAge: 86400
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve uploaded files statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Debug middleware - request logging
-app.use((req, res, next) => {
-  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
-  next();
-});
-
-// ✅ IMPORT ROUTES AFTER DB CONNECTION
-// Using dynamic imports to avoid circular dependencies
-let authRoutes, productRoutes, wishlistRoutes, cartRoutes, userRoutes, categoryRoutes;
-
-(async () => {
-  try {
-    // Import routes dynamically
-    authRoutes = (await import("./routes/authRoutes.js")).default;
-    productRoutes = (await import("./routes/productRoutes.js")).default;
-    wishlistRoutes = (await import("./routes/Wishlist.js")).default;
-    cartRoutes = (await import("./routes/cartRoutes.js")).default;
-    userRoutes = (await import("./routes/userRoutes.js")).default;
-    categoryRoutes = (await import("./routes/categoryRoutes.js")).default;
-    
-    // Import passport configs
-    await import("./config/googleAuth.js");
-    await import("./config/telegramBot.js");
-    
-    // Initialize passport
-    const passport = (await import("passport")).default;
-    app.use(passport.initialize());
-    
-    console.log("✅ All routes imported successfully");
-  } catch (error) {
-    console.error("❌ Error importing routes:", error.message);
-  }
-})();
-
-// ✅ Routes (will be set after dynamic imports)
-setTimeout(() => {
-  app.use("/api/auth", authRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-  app.use("/api/products", productRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-  app.use("/api/wishlist", wishlistRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-  app.use("/api/users", userRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-  app.use("/api/categories", categoryRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-  app.use("/api/cart", cartRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
-}, 1000);
-
-// Health check endpoint
-app.get("/api/health", (req, res) => {
-  res.json({ 
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    cors: {
-      allowedOrigins: allowedOrigins,
-      environment: process.env.NODE_ENV || 'development'
-    }
-  });
-});
-
-// API Documentation endpoint
+// ✅ IMMEDIATELY AVAILABLE ROUTES (Work even before DB connects)
 app.get("/", (req, res) => {
   res.json({ 
-    message: "Just Becho API running...",
-    timestamp: new Date().toISOString(),
+    message: "🚀 Just Becho API is running",
     version: "1.0.0",
-    cors: {
-      allowedOrigins: allowedOrigins,
-      note: "Frontend should be hosted on one of these origins"
-    },
-    routes: {
+    endpoints: {
       auth: "/api/auth",
-      products: "/api/products", 
-      wishlist: "/api/wishlist",
-      users: "/api/users",
-      categories: "/api/categories",
+      products: "/api/products",
       cart: "/api/cart",
+      categories: "/api/categories",
       health: "/api/health"
     }
   });
 });
 
-// 404 handler for undefined routes
-app.use((req, res) => {
-  console.log(`❌ 404 - Route not found: ${req.method} ${req.url}`);
-  res.status(404).json({ 
-    message: `Route ${req.method} ${req.url} not found`,
-    success: false,
-    allowedOrigins: allowedOrigins
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'connecting'
   });
 });
 
-// Global error handling middleware
-app.use((error, req, res, next) => {
-  console.error('💥 Global error handler:', error);
-  
-  // CORS errors
-  if (error.message.includes('CORS policy')) {
-    return res.status(403).json({ 
-      message: error.message,
-      success: false,
-      allowedOrigins: allowedOrigins
-    });
-  }
-  
-  // Multer errors
-  if (error.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ 
-      message: 'File too large. Maximum size is 5MB.',
-      success: false
-    });
-  }
-  
-  if (error.code === 'LIMIT_FILE_COUNT') {
-    return res.status(400).json({ 
-      message: 'Too many files. Maximum 5 images allowed.',
-      success: false
-    });
-  }
-  
-  if (error.code === 'LIMIT_UNEXPECTED_FILE') {
-    return res.status(400).json({ 
-      message: 'Unexpected file field.',
-      success: false
-    });
-  }
-  
-  // Mongoose CastError (ObjectId format)
-  if (error.name === 'CastError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid ID format'
-    });
-  }
-  
-  // Mongoose ValidationError
-  if (error.name === 'ValidationError') {
-    const messages = Object.values(error.errors).map(err => err.message);
-    return res.status(400).json({
-      success: false,
-      message: messages.join(', ')
-    });
-  }
-  
-  // Default error response
-  res.status(error.status || 500).json({
-    message: error.message || 'Internal server error',
-    success: false,
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+app.get("/api/categories", (req, res) => {
+  res.json({
+    success: true,
+    categories: [
+      "Mobile Phones", "Laptops", "Tablets", "Smart Watches",
+      "Headphones", "Cameras", "Gaming Consoles", "TVs",
+      "Home Appliances", "Fashion", "Books", "Sports Equipment",
+      "Musical Instruments", "Furniture", "Other"
+    ]
   });
 });
 
-// ✅ AUTO-ADMIN CREATION FUNCTION
-const createAdminUser = async () => {
+// ✅ Connect to MongoDB and load other routes
+const initializeApp = async () => {
   try {
-    const User = (await import('./models/User.js')).default;
-    const bcrypt = await import('bcryptjs');
+    console.log("🔗 Connecting to MongoDB...");
     
-    const existingAdmin = await User.findOne({ email: 'admin@justbecho.com' });
+    const mongoURI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
     
-    if (!existingAdmin) {
-      const hashedPassword = await bcrypt.default.hash('admin123', 10);
-      
-      const adminUser = new User({
-        email: 'admin@justbecho.com',
-        password: hashedPassword,
-        name: 'Super Admin',
-        phone: '9999999999',
-        role: 'admin',
-        profileCompleted: true,
-        sellerVerified: true
-      });
-
-      await adminUser.save();
-      console.log('🎯 AUTO-CREATED: Admin user!');
-      console.log('📧 Email: admin@justbecho.com');
-      console.log('🔑 Password: admin123');
-      console.log('👤 Role: admin');
-    } else {
-      console.log('ℹ️ Admin user already exists');
-    }
+    await mongoose.connect(mongoURI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    
+    console.log("✅ MongoDB Connected!");
+    
+    // ✅ Import all routes
+    console.log("📦 Loading routes...");
+    
+    const authRoutes = (await import("./routes/authRoutes.js")).default;
+    const productRoutes = (await import("./routes/productRoutes.js")).default;
+    const cartRoutes = (await import("./routes/cartRoutes.js")).default;
+    const userRoutes = (await import("./routes/userRoutes.js")).default;
+    const wishlistRoutes = (await import("./routes/Wishlist.js")).default;
+    const categoryRoutes = (await import("./routes/categoryRoutes.js")).default;
+    
+    // ✅ Register routes
+    app.use("/api/auth", authRoutes);
+    app.use("/api/products", productRoutes);
+    app.use("/api/cart", cartRoutes);
+    app.use("/api/users", userRoutes);
+    app.use("/api/wishlist", wishlistRoutes);
+    app.use("/api/categories", categoryRoutes);
+    
+    console.log("✅ All routes loaded successfully!");
+    
   } catch (error) {
-    console.log('⚠️ Admin creation skipped:', error.message);
+    console.error("❌ Initialization error:", error.message);
+    console.log("⚠️ Server running with basic routes only");
+    
+    // Provide fallback for cart route to prevent 404
+    app.use("/api/cart", (req, res) => {
+      res.status(503).json({
+        success: false,
+        message: "Server initializing, please try again in a moment"
+      });
+    });
   }
 };
 
+// Start initialization (non-blocking)
+initializeApp();
+
+// ✅ 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.method} ${req.url} not found`,
+    availableRoutes: [
+      "/",
+      "/api/health",
+      "/api/categories",
+      "/api/auth",
+      "/api/products",
+      "/api/cart",
+      "/api/users",
+      "/api/wishlist"
+    ]
+  });
+});
+
+// ✅ Global Error Handler
+app.use((err, req, res, next) => {
+  console.error("💥 Server Error:", err);
+  
+  // Don't crash the server on Vercel
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+    ...(process.env.NODE_ENV === 'development' && { error: err.message })
+  });
+});
+
+// ✅ Start server for local development
 const PORT = process.env.PORT || 8000;
 
-app.listen(PORT, () => {
-  console.log(`
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`
 ╔══════════════════════════════════════════════════════════╗
 ║                  🚀 JUST BECHO SERVER                    ║
 ╚══════════════════════════════════════════════════════════╝
-
-📊 SERVER STATUS:
-  ✅ Port: ${PORT}
-  ✅ Environment: ${process.env.NODE_ENV || 'development'}
-  ✅ API URL: http://localhost:${PORT}
-  ✅ Database: Connected ✅
-
-🌐 CORS CONFIGURATION:
-${allowedOrigins.map(origin => `  ✅ ${origin}`).join('\n')}
-
-🤖 TELEGRAM BOT STATUS:
-  ✅ Bot Token: HARDCODED ✅
-  🤖 Bot Name: Just Becho Bot
-  🔑 Token: 8478776735:AAGW_4rg8BeSy29xDLQrDCZA1pDolRxZUuk
-  
-📡 AVAILABLE API ENDPOINTS:
-  🔐 Auth:        http://localhost:${PORT}/api/auth
-  🛍️  Products:    http://localhost:${PORT}/api/products
-  ❤️  Wishlist:    http://localhost:${PORT}/api/wishlist
-  👤 Users:       http://localhost:${PORT}/api/users
-  📁 Categories:  http://localhost:${PORT}/api/categories
-  🛒  Cart:        http://localhost:${PORT}/api/cart
-  ❤️  Health:      http://localhost:${PORT}/api/health
-
-📁 UPLOADS DIRECTORY:
-  ${path.join(__dirname, 'uploads')}
-
+📊 Server running on port ${PORT}
+🌐 API URL: http://localhost:${PORT}
+📁 Environment: ${process.env.NODE_ENV || 'development'}
 ──────────────────────────────────────────────────────────
-✅ Server is running. Press Ctrl+C to stop.
-──────────────────────────────────────────────────────────
-  `);
-  
-  // ✅ CALL AUTO-ADMIN FUNCTION AFTER SERVER STARTS
-  setTimeout(() => {
-    createAdminUser();
-  }, 2000);
-});
+    `);
+  });
+}
 
+// ✅ MUST BE AT THE END: Export for Vercel
 export default app;
