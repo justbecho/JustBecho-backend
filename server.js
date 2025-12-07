@@ -1,7 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import passport from "passport";
 import path from "path";
 import { fileURLToPath } from 'url';
 
@@ -17,19 +16,10 @@ if (!process.env.MONGODB_URI) {
   process.env.MONGODB_URI = "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/?appName=justbecho-cluster";
 }
 
-// STEP 2: passport file import after env
-import "./config/googleAuth.js";
-import "./config/telegramBot.js"; // ✅ Telegram Bot
-
+// STEP 2: Import DB connection
 import connectDB from "./config/db.js";
-import authRoutes from "./routes/authRoutes.js";
-import productRoutes from "./routes/productRoutes.js";
-import wishlistRoutes from "./routes/Wishlist.js";
-import cartRoutes from "./routes/cartRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
-import categoryRoutes from "./routes/categoryRoutes.js";
 
-// STEP 3: Connect DB
+// STEP 3: Connect DB first
 connectDB();
 
 // ES modules fix for __dirname
@@ -38,7 +28,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ FIXED CORS Configuration - SIMPLE VERSION
+// ✅ CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'https://just-becho-frontend.vercel.app',
@@ -49,7 +39,6 @@ const allowedOrigins = [
   'https://www.justbecho.com'
 ];
 
-// Simple CORS - NO app.options('*') error
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
@@ -59,15 +48,11 @@ app.use(cors({
   maxAge: 86400
 }));
 
-// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// STEP 4: Initialize passport
-app.use(passport.initialize());
 
 // Debug middleware - request logging
 app.use((req, res, next) => {
@@ -75,13 +60,43 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/wishlist", wishlistRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/cart", cartRoutes);
+// ✅ IMPORT ROUTES AFTER DB CONNECTION
+// Using dynamic imports to avoid circular dependencies
+let authRoutes, productRoutes, wishlistRoutes, cartRoutes, userRoutes, categoryRoutes;
+
+(async () => {
+  try {
+    // Import routes dynamically
+    authRoutes = (await import("./routes/authRoutes.js")).default;
+    productRoutes = (await import("./routes/productRoutes.js")).default;
+    wishlistRoutes = (await import("./routes/Wishlist.js")).default;
+    cartRoutes = (await import("./routes/cartRoutes.js")).default;
+    userRoutes = (await import("./routes/userRoutes.js")).default;
+    categoryRoutes = (await import("./routes/categoryRoutes.js")).default;
+    
+    // Import passport configs
+    await import("./config/googleAuth.js");
+    await import("./config/telegramBot.js");
+    
+    // Initialize passport
+    const passport = (await import("passport")).default;
+    app.use(passport.initialize());
+    
+    console.log("✅ All routes imported successfully");
+  } catch (error) {
+    console.error("❌ Error importing routes:", error.message);
+  }
+})();
+
+// ✅ Routes (will be set after dynamic imports)
+setTimeout(() => {
+  app.use("/api/auth", authRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+  app.use("/api/products", productRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+  app.use("/api/wishlist", wishlistRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+  app.use("/api/users", userRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+  app.use("/api/categories", categoryRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+  app.use("/api/cart", cartRoutes || ((req, res) => res.status(503).json({ message: "Routes loading..." })));
+}, 1000);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -190,7 +205,6 @@ app.use((error, req, res, next) => {
 // ✅ AUTO-ADMIN CREATION FUNCTION
 const createAdminUser = async () => {
   try {
-    // Import inside function to avoid circular dependencies
     const User = (await import('./models/User.js')).default;
     const bcrypt = await import('bcryptjs');
     
