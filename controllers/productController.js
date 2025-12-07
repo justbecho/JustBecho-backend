@@ -1,9 +1,8 @@
-// controllers/productController.js - COMPLETE FIXED VERSION
 import Product from "../models/Product.js";
 import User from "../models/User.js";
-import { v2 as cloudinary } from 'cloudinary';
+import cloudinary from './config/cloudinary.js';
 
-// ✅ CREATE PRODUCT - WITH MEMORY STORAGE & CLOUDINARY UPLOAD
+// ✅ CREATE PRODUCT - WITH CLOUDINARY & FALLBACK
 const createProduct = async (req, res) => {
   console.log('=== 🚨 CREATE PRODUCT REQUEST START ===');
   
@@ -56,7 +55,7 @@ const createProduct = async (req, res) => {
 
     console.log('✅ All validations passed');
 
-    // ✅ FIXED: Calculate platform fee and final price
+    // ✅ Parse price
     const price = parseFloat(askingPrice);
     console.log('💰 Price parsing:', { askingPrice, parsed: price });
 
@@ -92,17 +91,21 @@ const createProduct = async (req, res) => {
       finalPrice: finalPrice
     });
 
-    // ✅ UPLOAD TO CLOUDINARY FROM MEMORY BUFFER
-    console.log('☁️ Uploading to Cloudinary...');
+    // ✅ UPLOAD IMAGES - CLOUDINARY WITH FALLBACK
+    console.log('☁️ Starting image upload...');
     const imageUrls = [];
 
-    for (const file of req.files) {
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
       try {
-        // Convert buffer to base64
+        console.log(`📤 Uploading image ${i + 1}/${req.files.length}: ${file.originalname}`);
+        
+        // Convert buffer to base64 for Cloudinary
         const b64 = Buffer.from(file.buffer).toString('base64');
         const dataURI = `data:${file.mimetype};base64,${b64}`;
         
-        // Upload to Cloudinary
+        // Try Cloudinary upload
+        console.log('🔄 Attempting Cloudinary upload...');
         const result = await cloudinary.uploader.upload(dataURI, {
           folder: 'justbecho/products',
           use_filename: true,
@@ -110,21 +113,51 @@ const createProduct = async (req, res) => {
           transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
         });
 
-        console.log(`✅ Image uploaded: ${result.secure_url}`);
+        console.log(`✅ Cloudinary upload successful: ${result.secure_url}`);
         
         imageUrls.push({
           url: result.secure_url,
           publicId: result.public_id,
-          isPrimary: imageUrls.length === 0
+          isPrimary: i === 0,
+          uploadedVia: 'cloudinary'
         });
 
       } catch (uploadError) {
-        console.error(`❌ Cloudinary upload failed:`, uploadError);
-        throw new Error(`Failed to upload image: ${file.originalname}`);
+        console.error(`❌ Cloudinary upload failed: ${uploadError.message}`);
+        
+        // ✅ FALLBACK: Store as base64
+        console.log(`🔄 Using fallback (base64) for: ${file.originalname}`);
+        const b64 = Buffer.from(file.buffer).toString('base64');
+        const dataURI = `data:${file.mimetype};base64,${b64}`;
+        
+        // Check if base64 is too large (MongoDB has 16MB limit)
+        const sizeKB = Math.round(b64.length / 1024);
+        if (sizeKB > 10000) { // 10MB limit for base64
+          console.log(`⚠️ Base64 too large (${sizeKB}KB), skipping image`);
+          continue;
+        }
+        
+        imageUrls.push({
+          url: dataURI,
+          publicId: `base64_${Date.now()}_${i}`,
+          isPrimary: i === 0,
+          uploadedVia: 'base64',
+          sizeKB: sizeKB
+        });
+        
+        console.log(`✅ Stored as base64 (${sizeKB}KB)`);
       }
     }
 
-    console.log('🖼️ All images uploaded:', imageUrls.length);
+    // ✅ Check if we have at least one image
+    if (imageUrls.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to process any images. Please try again.'
+      });
+    }
+
+    console.log(`🖼️ Total images processed: ${imageUrls.length}`);
 
     // ✅ Create product data
     const productData = {
@@ -139,7 +172,8 @@ const createProduct = async (req, res) => {
       finalPrice: Number(finalPrice),
       images: imageUrls,
       seller: req.user.userId,
-      status: 'active'
+      status: 'active',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
     };
 
     // ✅ Add optional fields
@@ -147,13 +181,18 @@ const createProduct = async (req, res) => {
       productData.purchaseYear = parseInt(purchaseYear);
     }
 
-    console.log('📦 Product Data:', productData);
+    console.log('📦 Final Product Data:', {
+      productName: productData.productName,
+      category: productData.category,
+      price: productData.finalPrice,
+      imageCount: productData.images.length
+    });
 
     // ✅ Create and save product
     const product = new Product(productData);
     const savedProduct = await product.save();
     
-    console.log('✅ Product saved! ID:', savedProduct._id);
+    console.log('✅ Product saved successfully! ID:', savedProduct._id);
     console.log('=== ✅ CREATE PRODUCT SUCCESS ===');
 
     res.status(201).json({
@@ -164,13 +203,19 @@ const createProduct = async (req, res) => {
         productName: savedProduct.productName,
         brand: savedProduct.brand,
         finalPrice: savedProduct.finalPrice,
-        images: savedProduct.images
+        images: savedProduct.images.map(img => ({
+          url: img.url.substring(0, 50) + '...', // Truncate for response
+          isPrimary: img.isPrimary
+        })),
+        category: savedProduct.category,
+        status: savedProduct.status
       }
     });
 
   } catch (error) {
     console.error('=== ❌ CREATE PRODUCT ERROR ===');
-    console.error('Error:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
     
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
@@ -180,9 +225,17 @@ const createProduct = async (req, res) => {
       });
     }
 
+    if (error.name === 'MongoError' && error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product with similar details already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Server error while creating product: ' + error.message
+      message: 'Server error while creating product',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -190,15 +243,27 @@ const createProduct = async (req, res) => {
 // ✅ GET USER PRODUCTS
 const getUserProducts = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    console.log('📦 Fetching user products for:', req.user.userId);
     
-    const products = await Product.find({ seller: userId })
+    const products = await Product.find({ seller: req.user.userId })
       .sort({ createdAt: -1 })
-      .populate('seller', 'name email username');
+      .populate('seller', 'name email username')
+      .lean();
+
+    // Process images for response
+    const processedProducts = products.map(product => ({
+      ...product,
+      images: product.images.map(img => ({
+        url: img.url,
+        isPrimary: img.isPrimary,
+        uploadedVia: img.uploadedVia || 'unknown'
+      }))
+    }));
 
     res.status(200).json({
       success: true,
-      products: products
+      count: processedProducts.length,
+      products: processedProducts
     });
   } catch (error) {
     console.error('Get User Products Error:', error);
@@ -212,12 +277,20 @@ const getUserProducts = async (req, res) => {
 // ✅ GET ALL PRODUCTS (Public)
 const getAllProducts = async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, search, minPrice, maxPrice } = req.query;
+    const { page = 1, limit = 20, category, search, minPrice, maxPrice, sort = 'newest' } = req.query;
     
-    let query = { status: 'active', expiresAt: { $gt: new Date() } };
+    console.log('📦 Fetching all products with filters:', {
+      page, limit, category, search, minPrice, maxPrice, sort
+    });
     
-    if (category) {
-      query.category = category;
+    let query = { 
+      status: 'active', 
+      expiresAt: { $gt: new Date() } 
+    };
+    
+    // Apply filters
+    if (category && category !== 'all') {
+      query.category = new RegExp(category, 'i');
     }
     
     if (search) {
@@ -236,20 +309,44 @@ const getAllProducts = async (req, res) => {
       query.finalPrice = { ...query.finalPrice, $lte: Number(maxPrice) };
     }
 
+    // Sorting
+    let sortOption = { createdAt: -1 }; // newest first by default
+    if (sort === 'price-low') sortOption = { finalPrice: 1 };
+    if (sort === 'price-high') sortOption = { finalPrice: -1 };
+    if (sort === 'popular') sortOption = { views: -1, likes: -1 };
+
+    const skip = (page - 1) * limit;
+    
     const products = await Product.find(query)
-      .populate('seller', 'name email avatar username')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .populate('seller', 'name email avatar username rating')
+      .sort(sortOption)
+      .limit(Number(limit))
+      .skip(skip)
+      .lean();
 
     const total = await Product.countDocuments(query);
 
+    // Process images
+    const processedProducts = products.map(product => ({
+      ...product,
+      images: product.images.slice(0, 1), // Only send first image for listing
+      seller: product.seller ? {
+        _id: product.seller._id,
+        name: product.seller.name,
+        username: product.seller.username,
+        rating: product.seller.rating
+      } : null
+    }));
+
     res.status(200).json({
       success: true,
-      products,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total
+      products: processedProducts,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     console.error('Get All Products Error:', error);
@@ -264,7 +361,7 @@ const getAllProducts = async (req, res) => {
 const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 20 } = req.query;
     
     console.log('🎯 Fetching products for category:', category);
     
@@ -274,21 +371,33 @@ const getProductsByCategory = async (req, res) => {
       category: new RegExp(category, 'i')
     };
 
+    const skip = (page - 1) * limit;
+    
     const products = await Product.find(query)
-      .populate('seller', 'name email avatar username')
+      .populate('seller', 'name email avatar username rating')
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(Number(limit))
+      .skip(skip)
+      .lean();
 
     const total = await Product.countDocuments(query);
 
+    // Process images
+    const processedProducts = products.map(product => ({
+      ...product,
+      images: product.images.slice(0, 1) // Only first image
+    }));
+
     res.status(200).json({
       success: true,
-      products,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-      category
+      products: processedProducts,
+      category: category,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     console.error('Get Products By Category Error:', error);
@@ -302,8 +411,12 @@ const getProductsByCategory = async (req, res) => {
 // ✅ GET SINGLE PRODUCT
 const getProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate('seller', 'name email avatar phone username');
+    const { id } = req.params;
+    console.log('🔍 Fetching product:', id);
+    
+    const product = await Product.findById(id)
+      .populate('seller', 'name email avatar phone username rating createdAt')
+      .lean();
 
     if (!product) {
       return res.status(404).json({
@@ -313,15 +426,34 @@ const getProduct = async (req, res) => {
     }
 
     // Increment views
-    product.views += 1;
-    await product.save();
+    await Product.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
     res.status(200).json({
       success: true,
-      product
+      product: {
+        ...product,
+        seller: product.seller ? {
+          _id: product.seller._id,
+          name: product.seller.name,
+          email: product.seller.email,
+          avatar: product.seller.avatar,
+          phone: product.seller.phone,
+          username: product.seller.username,
+          rating: product.seller.rating,
+          memberSince: product.seller.createdAt
+        } : null
+      }
     });
   } catch (error) {
     console.error('Get Product Error:', error);
+    
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product ID format'
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -332,7 +464,10 @@ const getProduct = async (req, res) => {
 // ✅ UPDATE PRODUCT
 const updateProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const { id } = req.params;
+    console.log('✏️ Updating product:', id);
+    
+    const product = await Product.findById(id);
     
     if (!product) {
       return res.status(404).json({
@@ -353,11 +488,30 @@ const updateProduct = async (req, res) => {
       });
     }
 
+    // Update fields
+    const updates = { ...req.body };
+    
+    // Handle price updates - recalculate final price
+    if (updates.askingPrice) {
+      const price = parseFloat(updates.askingPrice);
+      
+      let platformFeePercentage = 0;
+      if (price <= 2000) platformFeePercentage = 30;
+      else if (price <= 5000) platformFeePercentage = 28;
+      else if (price <= 10000) platformFeePercentage = 25;
+      else if (price <= 15000) platformFeePercentage = 20;
+      else platformFeePercentage = 15;
+
+      const feeAmount = (price * platformFeePercentage) / 100;
+      updates.finalPrice = Math.ceil(price + feeAmount);
+      updates.platformFee = platformFeePercentage;
+    }
+
     const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.id,
-      req.body,
+      id,
+      updates,
       { new: true, runValidators: true }
-    );
+    ).populate('seller', 'name username');
 
     res.status(200).json({
       success: true,
@@ -385,7 +539,10 @@ const updateProduct = async (req, res) => {
 // ✅ DELETE PRODUCT
 const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const { id } = req.params;
+    console.log('🗑️ Deleting product:', id);
+    
+    const product = await Product.findById(id);
     
     if (!product) {
       return res.status(404).json({
@@ -406,18 +563,21 @@ const deleteProduct = async (req, res) => {
       });
     }
 
-    // Delete images from Cloudinary
+    // Delete Cloudinary images if they exist
     if (product.images && product.images.length > 0) {
       for (const image of product.images) {
-        try {
-          await cloudinary.uploader.destroy(image.publicId);
-        } catch (cloudinaryError) {
-          console.error('Error deleting from Cloudinary:', cloudinaryError);
+        if (image.uploadedVia === 'cloudinary' && image.publicId) {
+          try {
+            await cloudinary.uploader.destroy(image.publicId);
+            console.log(`✅ Deleted from Cloudinary: ${image.publicId}`);
+          } catch (cloudinaryError) {
+            console.error('Error deleting from Cloudinary:', cloudinaryError);
+          }
         }
       }
     }
 
-    await Product.findByIdAndDelete(req.params.id);
+    await Product.findByIdAndDelete(id);
 
     res.status(200).json({
       success: true,
@@ -439,13 +599,19 @@ const getFeaturedProducts = async (req, res) => {
       status: 'active',
       expiresAt: { $gt: new Date() }
     })
-      .sort({ views: -1, likes: -1 })
-      .limit(8)
-      .populate('seller', 'name username');
+      .sort({ views: -1, likes: -1, createdAt: -1 })
+      .limit(12)
+      .populate('seller', 'name username rating')
+      .lean();
+
+    const processedProducts = products.map(product => ({
+      ...product,
+      images: product.images.slice(0, 1) // Only first image
+    }));
 
     res.status(200).json({
       success: true,
-      products
+      products: processedProducts
     });
   } catch (error) {
     console.error('Get Featured Products Error:', error);
@@ -459,9 +625,14 @@ const getFeaturedProducts = async (req, res) => {
 // ✅ SEARCH PRODUCTS
 const searchProducts = async (req, res) => {
   try {
-    const { q, category, minPrice, maxPrice } = req.query;
+    const { q, category, minPrice, maxPrice, limit = 20 } = req.query;
     
-    let query = { status: 'active', expiresAt: { $gt: new Date() } };
+    console.log('🔍 Searching products:', { q, category, minPrice, maxPrice });
+    
+    let query = { 
+      status: 'active', 
+      expiresAt: { $gt: new Date() } 
+    };
     
     if (q) {
       query.$or = [
@@ -472,8 +643,8 @@ const searchProducts = async (req, res) => {
       ];
     }
     
-    if (category) {
-      query.category = category;
+    if (category && category !== 'all') {
+      query.category = new RegExp(category, 'i');
     }
     
     if (minPrice) {
@@ -487,11 +658,17 @@ const searchProducts = async (req, res) => {
     const products = await Product.find(query)
       .populate('seller', 'name username')
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(Number(limit))
+      .lean();
+
+    const processedProducts = products.map(product => ({
+      ...product,
+      images: product.images.slice(0, 1)
+    }));
 
     res.status(200).json({
       success: true,
-      products,
+      products: processedProducts,
       count: products.length
     });
   } catch (error) {
@@ -499,6 +676,73 @@ const searchProducts = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ GET RECENT PRODUCTS
+const getRecentProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ 
+      status: 'active',
+      expiresAt: { $gt: new Date() }
+    })
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .populate('seller', 'name username')
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      products
+    });
+  } catch (error) {
+    console.error('Get Recent Products Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ CLOUDINARY TEST ENDPOINT
+const testCloudinary = async (req, res) => {
+  try {
+    console.log('🧪 Testing Cloudinary connection...');
+    
+    // Test upload with sample image
+    const result = await cloudinary.uploader.upload(
+      'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+      { 
+        folder: 'justbecho/test',
+        public_id: `test_${Date.now()}`
+      }
+    );
+    
+    console.log('✅ Cloudinary test successful:', result.secure_url);
+    
+    // Cleanup
+    await cloudinary.uploader.destroy(result.public_id);
+    
+    res.json({
+      success: true,
+      message: 'Cloudinary is working correctly!',
+      cloudinary: {
+        cloud_name: cloudinary.config().cloud_name,
+        test_upload: 'successful',
+        test_url: result.secure_url
+      }
+    });
+  } catch (error) {
+    console.error('❌ Cloudinary test failed:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Cloudinary error: ' + error.message,
+      config: {
+        cloud_name: cloudinary.config().cloud_name,
+        api_key_set: !!cloudinary.config().api_key,
+        error: error.message
+      }
     });
   }
 };
@@ -513,5 +757,7 @@ export {
   getAllProducts,
   getProductsByCategory,
   getFeaturedProducts,
-  searchProducts
+  getRecentProducts,
+  searchProducts,
+  testCloudinary
 };
