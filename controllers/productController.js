@@ -1,15 +1,14 @@
-// controllers/productController.js - UPDATED WITH ADMIN SUPPORT
+// controllers/productController.js - COMPLETE FIXED VERSION FOR VERCEL
 import Product from "../models/Product.js";
-import User from "../models/User.js"; // ✅ ADDED USER IMPORT
-import { v2 as cloudinary } from 'cloudinary';
+import User from "../models/User.js";
 
-// ✅ CREATE PRODUCT - COMPLETELY FIXED
+// ✅ CREATE PRODUCT - FIXED FOR VERCEL (NO LOCAL UPLOADS)
 const createProduct = async (req, res) => {
   console.log('=== 🚨 CREATE PRODUCT REQUEST START ===');
   
   try {
     console.log('📥 Request Body:', req.body);
-    console.log('📸 Files count:', req.files ? req.files.length : 0);
+    console.log('📸 Files from Cloudinary middleware:', req.files);
     console.log('👤 User:', req.user);
 
     // ✅ Validate authentication
@@ -46,7 +45,7 @@ const createProduct = async (req, res) => {
       purchaseYear 
     } = req.body;
 
-    // ✅ Validate images
+    // ✅ Validate images (from Cloudinary middleware)
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -56,7 +55,7 @@ const createProduct = async (req, res) => {
 
     console.log('✅ All validations passed');
 
-    // ✅ FIXED: Calculate platform fee and final price (PROPERLY)
+    // ✅ FIXED: Calculate platform fee and final price
     const price = parseFloat(askingPrice);
     console.log('💰 Price parsing:', { askingPrice, parsed: price });
 
@@ -67,7 +66,7 @@ const createProduct = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Platform fee calculation
+    // ✅ Platform fee calculation
     let platformFeePercentage = 0;
     
     if (price <= 2000) {
@@ -82,7 +81,7 @@ const createProduct = async (req, res) => {
       platformFeePercentage = 15;
     }
 
-    // ✅ FIXED: Ensure numbers are valid
+    // ✅ Ensure numbers are valid
     const feeAmount = (price * platformFeePercentage) / 100;
     const finalPrice = Math.ceil(price + feeAmount);
 
@@ -93,40 +92,14 @@ const createProduct = async (req, res) => {
       finalPrice: finalPrice
     });
 
-    // ✅ FIXED: Validate calculations
-    if (isNaN(platformFeePercentage) || isNaN(finalPrice)) {
-      throw new Error('Price calculation resulted in invalid numbers');
-    }
+    // ✅ FIXED: Process Cloudinary images (req.files already have Cloudinary objects)
+    const imageUrls = req.files.map((file, index) => ({
+      url: file.path, // Cloudinary URL
+      publicId: file.filename, // Cloudinary public_id
+      isPrimary: index === 0
+    }));
 
-    // ✅ Upload images to Cloudinary
-    console.log('☁️ Starting image upload to Cloudinary...');
-    const imageUrls = [];
-
-    for (const file of req.files) {
-      console.log(`📤 Uploading image: ${file.filename}`);
-      
-      try {
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: 'justbecho/products',
-          use_filename: true,
-          unique_filename: true,
-        });
-
-        console.log(`✅ Image uploaded successfully: ${result.secure_url}`);
-        
-        imageUrls.push({
-          url: result.secure_url,
-          publicId: result.public_id,
-          isPrimary: imageUrls.length === 0 // First image as primary
-        });
-
-      } catch (uploadError) {
-        console.error(`❌ Image upload failed for ${file.filename}:`, uploadError);
-        throw new Error(`Failed to upload image: ${file.originalname}`);
-      }
-    }
-
-    console.log('🖼️ All images processed:', imageUrls.length);
+    console.log('🖼️ Cloudinary Images:', imageUrls);
 
     // ✅ FIXED: Create product data with PROPER numbers
     const productData = {
@@ -136,9 +109,9 @@ const createProduct = async (req, res) => {
       productType: productType.toString().trim(),
       condition: condition.toString().trim(),
       description: description.toString().trim(),
-      askingPrice: Number(price), // ✅ Ensure it's a number
-      platformFee: Number(platformFeePercentage), // ✅ Ensure it's a number
-      finalPrice: Number(finalPrice), // ✅ Ensure it's a number
+      askingPrice: Number(price),
+      platformFee: Number(platformFeePercentage),
+      finalPrice: Number(finalPrice),
       images: imageUrls,
       seller: req.user.userId,
       status: 'active'
@@ -149,12 +122,7 @@ const createProduct = async (req, res) => {
       productData.purchaseYear = parseInt(purchaseYear);
     }
 
-    console.log('📦 FINAL Product Data:', {
-      ...productData,
-      askingPrice: productData.askingPrice,
-      platformFee: productData.platformFee,
-      finalPrice: productData.finalPrice
-    });
+    console.log('📦 FINAL Product Data:', productData);
 
     // ✅ Create and save product
     console.log('💾 Creating product in database...');
@@ -171,7 +139,8 @@ const createProduct = async (req, res) => {
         id: savedProduct._id,
         productName: savedProduct.productName,
         brand: savedProduct.brand,
-        finalPrice: savedProduct.finalPrice
+        finalPrice: savedProduct.finalPrice,
+        images: savedProduct.images
       }
     });
 
@@ -202,7 +171,7 @@ const getUserProducts = async (req, res) => {
     
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 })
-      .populate('seller', 'name email');
+      .populate('seller', 'name email username');
 
     res.status(200).json({
       success: true,
@@ -237,7 +206,7 @@ const getAllProducts = async (req, res) => {
     }
 
     const products = await Product.find(query)
-      .populate('seller', 'name email avatar')
+      .populate('seller', 'name email avatar username')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -260,7 +229,7 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ GET PRODUCTS BY CATEGORY - NEW FUNCTION ADDED
+// ✅ GET PRODUCTS BY CATEGORY
 const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
@@ -272,12 +241,12 @@ const getProductsByCategory = async (req, res) => {
     let query = { 
       status: 'active', 
       expiresAt: { $gt: new Date() },
-      category: new RegExp(category, 'i') // Case-insensitive search
+      category: new RegExp(category, 'i')
     };
 
     // Find products
     const products = await Product.find(query)
-      .populate('seller', 'name email avatar')
+      .populate('seller', 'name email avatar username')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -307,7 +276,7 @@ const getProductsByCategory = async (req, res) => {
 const getProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
-      .populate('seller', 'name email avatar phone');
+      .populate('seller', 'name email avatar phone username');
 
     if (!product) {
       return res.status(404).json({
