@@ -1,7 +1,6 @@
 import Product from "../models/Product.js";
 import User from "../models/User.js";
-import cloudinary from './config/cloudinary.js';
-
+import cloudinary from '../../config/cloudinary.js';
 // ✅ CREATE PRODUCT - WITH CLOUDINARY & FALLBACK
 const createProduct = async (req, res) => {
   console.log('=== 🚨 CREATE PRODUCT REQUEST START ===');
