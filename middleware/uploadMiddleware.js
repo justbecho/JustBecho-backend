@@ -1,17 +1,8 @@
-// middleware/uploadMiddleware.js
+// middleware/uploadMiddleware.js - SIMPLE MEMORY STORAGE
 import multer from "multer";
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
-// ✅ CLOUDINARY STORAGE (NO LOCAL FILES)
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'justbecho/products',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
-  }
-});
+// ✅ MEMORY STORAGE (No local files)
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,
