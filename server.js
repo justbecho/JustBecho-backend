@@ -38,52 +38,26 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ UPDATED CORS Configuration - Allow Vercel frontend
+// ✅ FIXED CORS Configuration - SIMPLE VERSION
 const allowedOrigins = [
   'http://localhost:3000',
   'https://just-becho-frontend.vercel.app',
   'https://justbecho.vercel.app',
   'https://justbecho-frontend.vercel.app',
   'https://just-becho.vercel.app',
-  'https://justbecho.com', // For future custom domain
+  'https://justbecho.com',
   'https://www.justbecho.com'
 ];
 
+// Simple CORS - NO app.options('*') error
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, etc.)
-    if (!origin) {
-      console.log('✅ No Origin - Allowing request');
-      return callback(null, true);
-    }
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      console.log(`✅ CORS Allowed: ${origin}`);
-      return callback(null, true);
-    } else {
-      console.log(`❌ CORS Blocked: ${origin}`);
-      
-      // For development/testing, allow all
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`⚠️ Development mode - Allowing ${origin}`);
-        return callback(null, true);
-      }
-      
-      // In production, only allow specific origins
-      const error = new Error(`CORS policy: Origin ${origin} not allowed`);
-      return callback(error, false);
-    }
-  },
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'Origin'],
   exposedHeaders: ['Content-Length', 'Content-Type'],
-  maxAge: 86400 // 24 hours
+  maxAge: 86400
 }));
-
-// Handle preflight requests
-app.options('*', cors());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
