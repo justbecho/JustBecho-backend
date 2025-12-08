@@ -1,33 +1,56 @@
-// controllers/categoryController.js - UPDATED WITH SUB-CATEGORIES
 import Category from "../models/Category.js";
 
-// ✅ GET ALL CATEGORIES
+// ✅ GET ALL CATEGORIES (PUBLIC)
 export const getAllCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ isActive: true });
+    const categories = await Category.find({ isActive: true }).sort({ name: 1 });
+    
+    // If no categories in DB, return empty array
+    if (!categories || categories.length === 0) {
+      return res.status(200).json({
+        success: true,
+        categories: [],
+        message: "No categories found",
+        count: 0
+      });
+    }
+    
+    // Transform for frontend
+    const transformedCategories = categories.map(cat => ({
+      name: cat.name,
+      description: cat.description || "",
+      href: cat.href || `/categories/${cat.name.toLowerCase().replace(/\s+/g, '-')}`,
+      image: cat.image || "",
+      subCategories: cat.subCategories || [{
+        title: "ITEMS",
+        items: ["View All Products", "New Arrivals", "Best Sellers"]
+      }]
+    }));
     
     res.status(200).json({
       success: true,
-      categories: categories,
+      categories: transformedCategories,
       count: categories.length
     });
+    
   } catch (error) {
-    console.error('Get All Categories Error:', error);
+    console.error('❌ Category Controller Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: 'Server error: ' + error.message,
+      categories: []
     });
   }
 };
 
-// ✅ CREATE CATEGORY WITH SUB-CATEGORIES (Admin only)
+// ✅ CREATE CATEGORY (ADMIN)
 export const createCategory = async (req, res) => {
   try {
-    const { name, description, image, href, subCategories, isActive } = req.body;
+    const { name, description, image, href, subCategories } = req.body;
 
-    // Check if category already exists
-    const existingCategory = await Category.findOne({ name });
-    if (existingCategory) {
+    // Check if category exists
+    const existing = await Category.findOne({ name: new RegExp(`^${name}$`, 'i') });
+    if (existing) {
       return res.status(400).json({
         success: false,
         message: 'Category already exists'
@@ -36,11 +59,14 @@ export const createCategory = async (req, res) => {
 
     const category = new Category({
       name,
-      description,
-      image,
-      href,
-      subCategories, // ✅ NEW: Sub-categories support
-      isActive
+      description: description || "",
+      image: image || "",
+      href: href || `/categories/${name.toLowerCase().replace(/\s+/g, '-')}`,
+      subCategories: subCategories || [{
+        title: "ITEMS",
+        items: ["View All Products", "New Arrivals", "Best Sellers"]
+      }],
+      isActive: true
     });
 
     await category.save();
@@ -48,10 +74,10 @@ export const createCategory = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Category created successfully',
-      category: category
+      category
     });
   } catch (error) {
-    console.error('Create Category Error:', error);
+    console.error('❌ Create Category Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -59,21 +85,15 @@ export const createCategory = async (req, res) => {
   }
 };
 
-// ✅ UPDATE CATEGORY WITH SUB-CATEGORIES (Admin only)
+// ✅ UPDATE CATEGORY (ADMIN)
 export const updateCategory = async (req, res) => {
   try {
-    const { name, description, image, href, subCategories, isActive } = req.body;
+    const { id } = req.params;
+    const updates = req.body;
 
     const category = await Category.findByIdAndUpdate(
-      req.params.categoryId,
-      {
-        name,
-        description,
-        image,
-        href, // ✅ NEW: href support
-        subCategories, // ✅ NEW: Sub-categories update support
-        isActive
-      },
+      id,
+      updates,
       { new: true, runValidators: true }
     );
 
@@ -87,10 +107,10 @@ export const updateCategory = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Category updated successfully',
-      category: category
+      category
     });
   } catch (error) {
-    console.error('Update Category Error:', error);
+    console.error('❌ Update Category Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -98,10 +118,16 @@ export const updateCategory = async (req, res) => {
   }
 };
 
-// ✅ DELETE CATEGORY (Admin only)
+// ✅ DELETE CATEGORY (ADMIN)
 export const deleteCategory = async (req, res) => {
   try {
-    const category = await Category.findByIdAndDelete(req.params.categoryId);
+    const { id } = req.params;
+
+    const category = await Category.findByIdAndUpdate(
+      id,
+      { isActive: false },
+      { new: true }
+    );
 
     if (!category) {
       return res.status(404).json({
@@ -112,10 +138,10 @@ export const deleteCategory = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Category deleted successfully'
+      message: 'Category deactivated successfully'
     });
   } catch (error) {
-    console.error('Delete Category Error:', error);
+    console.error('❌ Delete Category Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
