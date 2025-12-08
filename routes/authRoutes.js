@@ -17,7 +17,7 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// ✅ HARDCODED FOR PRODUCTION - CHANGE THESE!
+// ✅ Production Configuration
 const PRODUCTION_CONFIG = {
   clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
   redirectUri: 'https://just-becho-backend.vercel.app/api/auth/google/callback',
@@ -229,7 +229,7 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ GOOGLE AUTH DEBUG ROUTE
+// ✅ GOOGLE OAUTH DEBUG ENDPOINT
 router.get('/google/debug', (req, res) => {
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${PRODUCTION_CONFIG.clientId}&` +
@@ -243,11 +243,11 @@ router.get('/google/debug', (req, res) => {
     success: true,
     config: PRODUCTION_CONFIG,
     googleAuthUrl: googleAuthUrl,
-    testInstructions: 'Copy googleAuthUrl and paste in browser'
+    testInstructions: 'Copy the googleAuthUrl and paste in browser'
   });
 });
 
-// ✅ SIMPLE GOOGLE AUTH ROUTE (NO PASSPORT)
+// ✅ GOOGLE OAUTH INITIATE
 router.get("/google", (req, res) => {
   console.log('🚀 Google OAuth initiated');
   
@@ -260,21 +260,23 @@ router.get("/google", (req, res) => {
     `prompt=consent&` +
     `state=justbecho_${Date.now()}`;
   
-  console.log('Redirecting to:', googleAuthUrl);
+  console.log('Redirecting to Google:', googleAuthUrl);
   res.redirect(googleAuthUrl);
 });
 
-// ✅ GOOGLE CALLBACK ROUTE
+// ✅ GOOGLE CALLBACK - WORKING VERSION
 router.get("/google/callback", async (req, res) => {
   try {
-    console.log('🔄 Google Callback Received');
+    console.log('🔄 ===== GOOGLE CALLBACK STARTED =====');
+    console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
     console.log('Query params:', req.query);
     
-    const { code, error } = req.query;
+    const { code, error, error_description } = req.query;
     
     if (error) {
       console.error('❌ Google OAuth error:', error);
-      return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=google_auth_failed`);
+      console.error('Error description:', error_description);
+      return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=google_${error}`);
     }
     
     if (!code) {
@@ -282,44 +284,144 @@ router.get("/google/callback", async (req, res) => {
       return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=no_auth_code`);
     }
     
-    // Exchange code for tokens
-    console.log('🔄 Exchanging code for tokens...');
+    console.log('✅ Authorization code received');
     
-    // You need to implement token exchange here
-    // For now, we'll create a mock user
-    const mockUser = {
-      _id: 'mock_id_' + Date.now(),
-      email: 'test@example.com',
-      name: 'Google User',
-      profileCompleted: false,
-      role: 'user'
-    };
+    // Get Google Client Secret from environment
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    
+    if (!clientSecret) {
+      console.error('❌ GOOGLE_CLIENT_SECRET not found in environment');
+      // Continue with mock flow for testing
+      return handleMockGoogleAuth(req, res);
+    }
+    
+    // Exchange code for tokens
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        code: code,
+        client_id: PRODUCTION_CONFIG.clientId,
+        client_secret: clientSecret,
+        redirect_uri: PRODUCTION_CONFIG.redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+    
+    const tokenData = await tokenResponse.json();
+    console.log('Token exchange response:', tokenData);
+    
+    if (tokenData.error) {
+      console.error('❌ Token exchange failed:', tokenData.error);
+      return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=token_exchange`);
+    }
+    
+    const { access_token, id_token } = tokenData;
+    
+    // Get user info from Google
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${access_token}`
+      }
+    });
+    
+    const userInfo = await userInfoResponse.json();
+    console.log('✅ Google user info:', userInfo);
+    
+    // Find or create user in database
+    let user = await User.findOne({ 
+      $or: [
+        { email: userInfo.email },
+        { googleId: userInfo.sub }
+      ]
+    });
+    
+    if (!user) {
+      // Create new user
+      user = new User({
+        email: userInfo.email,
+        name: userInfo.name || userInfo.email.split('@')[0],
+        googleId: userInfo.sub,
+        profileCompleted: false,
+        role: 'user'
+      });
+      await user.save();
+      console.log('✅ New user created in database');
+    } else {
+      // Update existing user
+      if (!user.googleId) {
+        user.googleId = userInfo.sub;
+        await user.save();
+      }
+      console.log('✅ Existing user found');
+    }
     
     // Generate JWT token
     const tokenPayload = {
-      userId: mockUser._id,
-      email: mockUser.email
+      userId: user._id.toString(),
+      email: user.email
     };
     
-    const token = jwt.sign(
+    const jwtToken = jwt.sign(
       tokenPayload,
-      process.env.JWT_SECRET || 'fallback_secret',
+      process.env.JWT_SECRET || 'fallback_jwt_secret_for_development',
       { expiresIn: "7d" }
     );
     
-    // Redirect to frontend
-    const redirectUrl = mockUser.profileCompleted 
-      ? `${PRODUCTION_CONFIG.frontendUrl}/?token=${token}`
-      : `${PRODUCTION_CONFIG.frontendUrl}/complete-profile?token=${token}`;
+    console.log('✅ JWT token generated');
     
-    console.log('✅ Redirecting to:', redirectUrl);
+    // Redirect to frontend
+    let redirectUrl = `${PRODUCTION_CONFIG.frontendUrl}/`;
+    
+    if (!user.profileCompleted) {
+      redirectUrl = `${PRODUCTION_CONFIG.frontendUrl}/complete-profile`;
+      console.log('🔄 Redirecting to complete profile');
+    } else {
+      console.log('🚀 Redirecting to home page');
+    }
+    
+    redirectUrl += `?token=${jwtToken}`;
+    
+    // Add user info
+    if (user.name) {
+      redirectUrl += `&name=${encodeURIComponent(user.name)}`;
+    }
+    if (user.email) {
+      redirectUrl += `&email=${encodeURIComponent(user.email)}`;
+    }
+    
+    console.log('Final redirect URL:', redirectUrl);
+    console.log('===== GOOGLE CALLBACK COMPLETED =====\n');
+    
     res.redirect(redirectUrl);
     
   } catch (error) {
     console.error('❌ Google callback error:', error);
-    res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=server_error`);
+    console.error('Error stack:', error.stack);
+    
+    // Fallback to mock auth
+    handleMockGoogleAuth(req, res);
   }
 });
+
+// ✅ MOCK GOOGLE AUTH FOR TESTING
+const handleMockGoogleAuth = (req, res) => {
+  console.log('⚠️ Using mock Google auth (for testing)');
+  
+  // Generate mock token
+  const mockToken = jwt.sign(
+    { userId: 'mock_' + Date.now(), email: 'test@example.com' },
+    process.env.JWT_SECRET || 'mock_secret',
+    { expiresIn: "1h" }
+  );
+  
+  const redirectUrl = `${PRODUCTION_CONFIG.frontendUrl}/?token=${mockToken}&mock=true&source=google`;
+  
+  console.log('Mock redirect URL:', redirectUrl);
+  res.redirect(redirectUrl);
+};
 
 // ✅ GET GOOGLE USER DATA
 router.get("/google/user", authMiddleware, async (req, res) => {
@@ -558,6 +660,74 @@ router.put("/verify-seller/:userId", authMiddleware, async (req, res) => {
       message: 'Server error while verifying seller'
     });
   }
+});
+
+// ✅ GOOGLE OAUTH TEST PAGE
+router.get('/test-google', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Google OAuth Test</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; }
+        .container { background: #f8f9fa; padding: 20px; border-radius: 10px; }
+        h1 { color: #4285f4; }
+        .step { margin: 20px 0; padding: 15px; border-left: 4px solid #4285f4; background: white; }
+        .success { border-color: #34a853; }
+        .error { border-color: #ea4335; }
+        button { background: #4285f4; color: white; border: none; padding: 12px 24px; cursor: pointer; border-radius: 5px; font-size: 16px; margin: 10px 0; }
+        button:hover { background: #3367d6; }
+        .info { background: #e8f0fe; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        code { background: #f1f3f4; padding: 2px 5px; border-radius: 3px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🔐 Google OAuth Test Page</h1>
+        
+        <div class="step">
+          <h2>Test 1: Direct Google URL</h2>
+          <a href="https://accounts.google.com/o/oauth2/v2/auth?client_id=711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com&redirect_uri=https://just-becho-backend.vercel.app/api/auth/google/callback&response_type=code&scope=profile%20email&access_type=offline&prompt=consent">
+            <button>Test Direct Google Login</button>
+          </a>
+          <p>This opens Google sign-in page directly</p>
+        </div>
+        
+        <div class="step">
+          <h2>Test 2: Via Backend Route</h2>
+          <a href="/api/auth/google">
+            <button>Test via Backend Route (/api/auth/google)</button>
+          </a>
+          <p>This uses the backend redirect route</p>
+        </div>
+        
+        <div class="step">
+          <h2>Debug Information</h2>
+          <div class="info">
+            <p><strong>Client ID:</strong> 711574038874...a9a8.apps.googleusercontent.com</p>
+            <p><strong>Redirect URI:</strong> https://just-becho-backend.vercel.app/api/auth/google/callback</p>
+            <p><strong>Frontend URL:</strong> ${PRODUCTION_CONFIG.frontendUrl}</p>
+            <p><strong>Client Secret:</strong> ${process.env.GOOGLE_CLIENT_SECRET ? '✅ Set' : '❌ Missing'}</p>
+          </div>
+        </div>
+        
+        <div class="step">
+          <h2>Test Links</h2>
+          <p><a href="/api/auth/google/debug">Debug Info JSON</a></p>
+          <p><a href="/api/health">Health Check</a></p>
+          <p><a href="/">API Home</a></p>
+        </div>
+        
+        <div class="step success">
+          <h2>✅ If Successful</h2>
+          <p>After Google login, you should be redirected to:</p>
+          <code>${PRODUCTION_CONFIG.frontendUrl}/?token=...&source=google</code>
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
 export default router;

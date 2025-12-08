@@ -38,7 +38,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ CORS Configuration
+// ✅ SIMPLIFIED CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'https://just-becho-frontend.vercel.app',
@@ -50,26 +50,11 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: allowedOrigins,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'Origin'],
-  exposedHeaders: ['Content-Length', 'Content-Type'],
-  maxAge: 86400
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Handle preflight requests
-app.options('*', cors());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -84,7 +69,6 @@ app.use(passport.initialize());
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
-  console.log(`   Origin: ${req.headers.origin || 'No origin'}`);
   next();
 });
 
@@ -118,7 +102,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API running...",
     timestamp: new Date().toISOString(),
-    version: "2.0.0",
+    version: "2.0.1",
     cors: {
       allowedOrigins: allowedOrigins,
       note: "Frontend should be hosted on one of these origins"
@@ -203,7 +187,7 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.0                ║
+║                  🚀 JUST BECHO SERVER 2.0.1              ║
 ╚══════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
