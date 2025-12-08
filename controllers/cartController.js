@@ -1,4 +1,4 @@
-// controllers/cartController.js - WITH MANUAL CALCULATION
+// controllers/cartController.js - WITH MANUAL CALCULATION main
 import Cart from "../models/Cart.js";
 import Product from "../models/Product.js";
 

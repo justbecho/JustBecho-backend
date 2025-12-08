@@ -5,21 +5,21 @@ import passport from "passport";
 import path from "path";
 import { fileURLToPath } from 'url';
 
-// STEP 1: Load env first
+// Load environment variables
 dotenv.config();
 
-// ✅ FIX: Hardcode Telegram Token
+// Hardcode Telegram Token
 process.env.TELEGRAM_BOT_TOKEN = "8478776735:AAGW_4rg8BeSy29xDLQrDCZA1pDolRxZUuk";
 console.log("✅ Telegram Token Hardcoded");
 
-// ✅ FIX: Hardcode MongoDB URI
+// Hardcode MongoDB URI if not set
 if (!process.env.MONGODB_URI) {
   process.env.MONGODB_URI = "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/?appName=justbecho-cluster";
 }
 
-// STEP 2: passport file import after env
+// Import configurations
 import "./config/googleAuth.js";
-import "./config/telegramBot.js"; // ✅ Telegram Bot
+import "./config/telegramBot.js";
 
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -29,7 +29,7 @@ import cartRoutes from "./routes/cartRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 
-// STEP 3: Connect DB
+// Connect to database
 connectDB();
 
 // ES modules fix for __dirname
@@ -38,7 +38,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ FIXED CORS Configuration - SIMPLE VERSION
+// ✅ CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'https://just-becho-frontend.vercel.app',
@@ -49,9 +49,18 @@ const allowedOrigins = [
   'https://www.justbecho.com'
 ];
 
-// Simple CORS - NO app.options('*') error
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'Origin'],
@@ -59,19 +68,23 @@ app.use(cors({
   maxAge: 86400
 }));
 
+// Handle preflight requests
+app.options('*', cors());
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve uploaded files statically
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// STEP 4: Initialize passport
+// Initialize passport
 app.use(passport.initialize());
 
-// Debug middleware - request logging
+// Request logging middleware
 app.use((req, res, next) => {
   console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log(`   Origin: ${req.headers.origin || 'No origin'}`);
   next();
 });
 
@@ -91,6 +104,11 @@ app.get("/api/health", (req, res) => {
     cors: {
       allowedOrigins: allowedOrigins,
       environment: process.env.NODE_ENV || 'development'
+    },
+    googleOAuth: {
+      clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
+      callbackUrl: 'https://just-becho-backend.vercel.app/api/auth/google/callback',
+      configured: true
     }
   });
 });
@@ -100,10 +118,16 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API running...",
     timestamp: new Date().toISOString(),
-    version: "1.0.0",
+    version: "2.0.0",
     cors: {
       allowedOrigins: allowedOrigins,
       note: "Frontend should be hosted on one of these origins"
+    },
+    googleOAuth: {
+      clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
+      authUrl: 'https://just-becho-backend.vercel.app/api/auth/google',
+      callbackUrl: 'https://just-becho-backend.vercel.app/api/auth/google/callback',
+      debugUrl: 'https://just-becho-backend.vercel.app/api/auth/google/debug'
     },
     routes: {
       auth: "/api/auth",
@@ -117,7 +141,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// 404 handler for undefined routes
+// 404 handler
 app.use((req, res) => {
   console.log(`❌ 404 - Route not found: ${req.method} ${req.url}`);
   res.status(404).json({ 
@@ -127,11 +151,10 @@ app.use((req, res) => {
   });
 });
 
-// Global error handling middleware
+// Global error handler
 app.use((error, req, res, next) => {
   console.error('💥 Global error handler:', error);
   
-  // CORS errors
   if (error.message.includes('CORS policy')) {
     return res.status(403).json({ 
       message: error.message,
@@ -140,57 +163,15 @@ app.use((error, req, res, next) => {
     });
   }
   
-  // Multer errors
-  if (error.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ 
-      message: 'File too large. Maximum size is 5MB.',
-      success: false
-    });
-  }
-  
-  if (error.code === 'LIMIT_FILE_COUNT') {
-    return res.status(400).json({ 
-      message: 'Too many files. Maximum 5 images allowed.',
-      success: false
-    });
-  }
-  
-  if (error.code === 'LIMIT_UNEXPECTED_FILE') {
-    return res.status(400).json({ 
-      message: 'Unexpected file field.',
-      success: false
-    });
-  }
-  
-  // Mongoose CastError (ObjectId format)
-  if (error.name === 'CastError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid ID format'
-    });
-  }
-  
-  // Mongoose ValidationError
-  if (error.name === 'ValidationError') {
-    const messages = Object.values(error.errors).map(err => err.message);
-    return res.status(400).json({
-      success: false,
-      message: messages.join(', ')
-    });
-  }
-  
-  // Default error response
   res.status(error.status || 500).json({
     message: error.message || 'Internal server error',
-    success: false,
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    success: false
   });
 });
 
-// ✅ AUTO-ADMIN CREATION FUNCTION
+// Auto-create admin user
 const createAdminUser = async () => {
   try {
-    // Import inside function to avoid circular dependencies
     const User = (await import('./models/User.js')).default;
     const bcrypt = await import('bcryptjs');
     
@@ -210,12 +191,7 @@ const createAdminUser = async () => {
       });
 
       await adminUser.save();
-      console.log('🎯 AUTO-CREATED: Admin user!');
-      console.log('📧 Email: admin@justbecho.com');
-      console.log('🔑 Password: admin123');
-      console.log('👤 Role: admin');
-    } else {
-      console.log('ℹ️ Admin user already exists');
+      console.log('🎯 Auto-created admin user');
     }
   } catch (error) {
     console.log('⚠️ Admin creation skipped:', error.message);
@@ -227,7 +203,7 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER                    ║
+║                  🚀 JUST BECHO SERVER 2.0                ║
 ╚══════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
@@ -236,14 +212,15 @@ app.listen(PORT, () => {
   ✅ API URL: http://localhost:${PORT}
   ✅ Database: Connected ✅
 
-🌐 CORS CONFIGURATION:
+🔐 GOOGLE OAUTH:
+  ✅ Client ID: 711574038874...a9a8.apps.googleusercontent.com
+  ✅ Callback URL: https://just-becho-backend.vercel.app/api/auth/google/callback
+  ✅ Auth URL: https://just-becho-backend.vercel.app/api/auth/google
+  ✅ Debug URL: https://just-becho-backend.vercel.app/api/auth/google/debug
+
+🌐 CORS ALLOWED ORIGINS:
 ${allowedOrigins.map(origin => `  ✅ ${origin}`).join('\n')}
 
-🤖 TELEGRAM BOT STATUS:
-  ✅ Bot Token: HARDCODED ✅
-  🤖 Bot Name: Just Becho Bot
-  🔑 Token: 8478776735:AAGW_4rg8BeSy29xDLQrDCZA1pDolRxZUuk
-  
 📡 AVAILABLE API ENDPOINTS:
   🔐 Auth:        http://localhost:${PORT}/api/auth
   🛍️  Products:    http://localhost:${PORT}/api/products
@@ -253,15 +230,12 @@ ${allowedOrigins.map(origin => `  ✅ ${origin}`).join('\n')}
   🛒  Cart:        http://localhost:${PORT}/api/cart
   ❤️  Health:      http://localhost:${PORT}/api/health
 
-📁 UPLOADS DIRECTORY:
-  ${path.join(__dirname, 'uploads')}
-
 ──────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.
 ──────────────────────────────────────────────────────────
   `);
   
-  // ✅ CALL AUTO-ADMIN FUNCTION AFTER SERVER STARTS
+  // Auto-create admin user
   setTimeout(() => {
     createAdminUser();
   }, 2000);

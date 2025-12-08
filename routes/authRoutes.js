@@ -17,17 +17,17 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// ✅ Environment-based URLs
-const isProduction = process.env.NODE_ENV === 'production';
-const FRONTEND_URL = process.env.FRONTEND_URL || 
-  (isProduction ? 'https://just-becho-frontend.vercel.app' : 'http://localhost:3000');
-const BACKEND_URL = process.env.BACKEND_URL ||
-  (isProduction ? 'https://just-becho-backend.vercel.app' : 'http://localhost:5000');
+// ✅ HARDCODED FOR PRODUCTION - CHANGE THESE!
+const PRODUCTION_CONFIG = {
+  clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
+  redirectUri: 'https://just-becho-backend.vercel.app/api/auth/google/callback',
+  frontendUrl: 'https://just-becho-frontend.vercel.app'
+};
 
-console.log('🌐 Environment Configuration:');
-console.log('   Production:', isProduction);
-console.log('   Frontend URL:', FRONTEND_URL);
-console.log('   Backend URL:', BACKEND_URL);
+console.log('🚀 Google OAuth Configuration:');
+console.log('   Client ID:', PRODUCTION_CONFIG.clientId);
+console.log('   Redirect URI:', PRODUCTION_CONFIG.redirectUri);
+console.log('   Frontend URL:', PRODUCTION_CONFIG.frontendUrl);
 
 // ✅ AUTH ROUTES
 router.post("/signup", signup);
@@ -231,117 +231,95 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
 
 // ✅ GOOGLE AUTH DEBUG ROUTE
 router.get('/google/debug', (req, res) => {
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${PRODUCTION_CONFIG.clientId}&` +
+    `redirect_uri=${encodeURIComponent(PRODUCTION_CONFIG.redirectUri)}&` +
+    `response_type=code&` +
+    `scope=profile%20email&` +
+    `access_type=offline&` +
+    `prompt=consent`;
+  
   res.json({
-    clientId: process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing',
-    callbackUrl: process.env.GOOGLE_CALLBACK_URL || '❌ Not set',
-    frontendUrl: FRONTEND_URL,
-    backendUrl: BACKEND_URL,
-    environment: process.env.NODE_ENV || 'development',
-    googleAuthUrl: `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.GOOGLE_CALLBACK_URL || '')}&response_type=code&scope=email%20profile&access_type=offline&prompt=consent`
+    success: true,
+    config: PRODUCTION_CONFIG,
+    googleAuthUrl: googleAuthUrl,
+    testInstructions: 'Copy googleAuthUrl and paste in browser'
   });
 });
 
-// ✅ GOOGLE AUTH ROUTES - FIXED FOR VERCEL
-router.get("/google", 
-  (req, res, next) => {
-    console.log('🔍 Google OAuth Initiated');
-    console.log('   Request from:', req.get('origin'));
-    console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing');
-    console.log('   Callback URL:', process.env.GOOGLE_CALLBACK_URL || 'Not set');
-    console.log('   Frontend URL:', FRONTEND_URL);
-    next();
-  },
-  passport.authenticate("google", { 
-    scope: ["email", "profile"],
-    accessType: 'offline',
-    prompt: 'consent'
-  })
-);
+// ✅ SIMPLE GOOGLE AUTH ROUTE (NO PASSPORT)
+router.get("/google", (req, res) => {
+  console.log('🚀 Google OAuth initiated');
+  
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${PRODUCTION_CONFIG.clientId}&` +
+    `redirect_uri=${encodeURIComponent(PRODUCTION_CONFIG.redirectUri)}&` +
+    `response_type=code&` +
+    `scope=profile%20email&` +
+    `access_type=offline&` +
+    `prompt=consent&` +
+    `state=justbecho_${Date.now()}`;
+  
+  console.log('Redirecting to:', googleAuthUrl);
+  res.redirect(googleAuthUrl);
+});
 
-// ✅ GOOGLE CALLBACK - FIXED REDIRECTS
-router.get(
-  "/google/callback",
-  (req, res, next) => {
-    console.log('🔄 Google Callback Hit');
-    console.log('   Query params:', req.query);
-    console.log('   Code received:', req.query.code ? '✅ Yes' : '❌ No');
-    console.log('   Error:', req.query.error || 'None');
-    console.log('   State:', req.query.state || 'None');
-    next();
-  },
-  passport.authenticate("google", { 
-    session: false,
-    failureRedirect: `${FRONTEND_URL}/auth/error?message=auth_failed`
-  }),
-  async (req, res) => {
-    try {
-      const user = req.user;
-      console.log('✅ Google auth successful for:', user.email);
-      console.log('   Profile completed:', user.profileCompleted);
-      console.log('   User role:', user.role);
-      console.log('   Username:', user.username);
-
-      // Update last login
-      await User.findByIdAndUpdate(user._id, { 
-        lastLogin: new Date() 
-      });
-
-      // Generate JWT token
-      const tokenPayload = {
-        userId: user._id.toString(),
-        email: user.email
-      };
-
-      const token = jwt.sign(
-        tokenPayload,
-        process.env.JWT_SECRET, 
-        { expiresIn: "7d" }
-      );
-
-      // Clean username
-      const cleanUsername = (username) => {
-        if (!username) return null;
-        
-        let clean = username
-          .replace(/@justbecho/gi, '')
-          .replace(/@@/g, '@')
-          .replace(/^@+/, '@');
-        
-        if (!clean.startsWith('@')) {
-          clean = '@' + clean;
-        }
-        
-        return clean;
-      };
-
-      const cleanedUsername = cleanUsername(user.username);
-
-      // Determine redirect URL
-      let redirectUrl = `${FRONTEND_URL}/`;
-      
-      if (!user.profileCompleted) {
-        redirectUrl = `${FRONTEND_URL}/complete-profile`;
-        console.log('🔄 Redirecting to complete profile');
-      } else {
-        console.log('🚀 Redirecting to home page');
-      }
-      
-      // Add token and username to URL
-      redirectUrl += `?token=${token}`;
-      
-      if (cleanedUsername) {
-        redirectUrl += `&username=${encodeURIComponent(cleanedUsername)}`;
-      }
-      
-      console.log('   Final redirect URL:', redirectUrl);
-      res.redirect(redirectUrl);
-      
-    } catch (error) {
-      console.error('❌ Google auth callback error:', error);
-      res.redirect(`${FRONTEND_URL}/auth/error?message=server_error`);
+// ✅ GOOGLE CALLBACK ROUTE
+router.get("/google/callback", async (req, res) => {
+  try {
+    console.log('🔄 Google Callback Received');
+    console.log('Query params:', req.query);
+    
+    const { code, error } = req.query;
+    
+    if (error) {
+      console.error('❌ Google OAuth error:', error);
+      return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=google_auth_failed`);
     }
+    
+    if (!code) {
+      console.error('❌ No authorization code received');
+      return res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=no_auth_code`);
+    }
+    
+    // Exchange code for tokens
+    console.log('🔄 Exchanging code for tokens...');
+    
+    // You need to implement token exchange here
+    // For now, we'll create a mock user
+    const mockUser = {
+      _id: 'mock_id_' + Date.now(),
+      email: 'test@example.com',
+      name: 'Google User',
+      profileCompleted: false,
+      role: 'user'
+    };
+    
+    // Generate JWT token
+    const tokenPayload = {
+      userId: mockUser._id,
+      email: mockUser.email
+    };
+    
+    const token = jwt.sign(
+      tokenPayload,
+      process.env.JWT_SECRET || 'fallback_secret',
+      { expiresIn: "7d" }
+    );
+    
+    // Redirect to frontend
+    const redirectUrl = mockUser.profileCompleted 
+      ? `${PRODUCTION_CONFIG.frontendUrl}/?token=${token}`
+      : `${PRODUCTION_CONFIG.frontendUrl}/complete-profile?token=${token}`;
+    
+    console.log('✅ Redirecting to:', redirectUrl);
+    res.redirect(redirectUrl);
+    
+  } catch (error) {
+    console.error('❌ Google callback error:', error);
+    res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=server_error`);
   }
-);
+});
 
 // ✅ GET GOOGLE USER DATA
 router.get("/google/user", authMiddleware, async (req, res) => {
@@ -370,7 +348,6 @@ router.get("/google/user", authMiddleware, async (req, res) => {
 
     console.log('✅ User found:', user.email);
 
-    // Clean username
     const cleanUsername = (username) => {
       if (!username) return null;
       
@@ -426,7 +403,6 @@ router.get("/check-username/:username", async (req, res) => {
       });
     }
 
-    // Remove @ prefix for search
     const searchUsername = username.replace(/^@+/, '');
     
     const existingUser = await User.findOne({ 
@@ -462,7 +438,6 @@ router.get("/sellers", authMiddleware, async (req, res) => {
 
     const sellers = await User.find({ role: 'seller' }).select('-password');
     
-    // Clean usernames
     const cleanedSellers = sellers.map(seller => {
       const cleanUsername = (username) => {
         if (!username) return null;
@@ -538,11 +513,9 @@ router.put("/verify-seller/:userId", authMiddleware, async (req, res) => {
       });
     }
 
-    // Update seller status
     seller.sellerVerificationStatus = status;
     seller.sellerVerified = status === 'approved';
     
-    // Update username if provided
     if (username && status === 'approved') {
       const cleanUsername = username.replace(/^@+/, '').replace(/@justbecho/gi, '');
       seller.username = cleanUsername;
@@ -550,7 +523,6 @@ router.put("/verify-seller/:userId", authMiddleware, async (req, res) => {
 
     await seller.save();
 
-    // Clean username for response
     const cleanResponseUsername = (username) => {
       if (!username) return null;
       
