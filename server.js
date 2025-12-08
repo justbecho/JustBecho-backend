@@ -1,3 +1,5 @@
+// ✅ server.js file mein yeh changes karo:
+
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -10,18 +12,22 @@ const app = express();
 
 // ✅ CORS Configuration
 app.use(cors({
-  origin: '*', // Sab allow karo for now
+  origin: ['http://localhost:3000', 'https://justbecho.vercel.app', 'https://just-becho-frontend.vercel.app'],
   credentials: true
 }));
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// ✅ IMMEDIATELY AVAILABLE ROUTES (ALWAYS WORK)
+// ✅ Favicon handler
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+// ✅ IMMEDIATELY AVAILABLE ROUTES
 app.get("/", (req, res) => {
   res.json({ 
-    message: "🚀 Just Becho API is running",
-    version: "1.0.0"
+    message: "🚀 Just Becho API",
+    version: "1.0.0",
+    status: 'healthy'
   });
 });
 
@@ -32,7 +38,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ✅ CRITICAL FIX: Categories ALWAYS available
+// ✅ Categories ALWAYS available
 app.get("/api/categories", (req, res) => {
   res.json({
     success: true,
@@ -45,26 +51,134 @@ app.get("/api/categories", (req, res) => {
   });
 });
 
-// ✅ Connect to MongoDB (WITH TIMEOUT)
+// ✅ CRITICAL FIX: Add missing route that frontend expects
+app.get("/api/products/category/:category", async (req, res) => {
+  try {
+    const { category } = req.params;
+    const { limit = 4 } = req.query;
+    
+    console.log(`📦 Products by category: ${category}, limit: ${limit}`);
+    
+    // If DB not connected, return empty
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: true,
+        category: category,
+        products: [],
+        message: "Database initializing"
+      });
+    }
+    
+    // Import Product model
+    const Product = (await import("./models/Product.js")).default;
+    
+    // Build query
+    let query = { 
+      status: 'active', 
+      expiresAt: { $gt: new Date() },
+      category: new RegExp(category, 'i')
+    };
+    
+    const products = await Product.find(query)
+      .populate('seller', 'name email avatar username')
+      .sort({ createdAt: -1 })
+      .limit(Number(limit));
+    
+    res.json({
+      success: true,
+      category: category,
+      products: products,
+      count: products.length
+    });
+    
+  } catch (error) {
+    console.error(`❌ /api/products/category error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
+// ✅ FIXED: Also support query parameter route
+app.get("/api/products", async (req, res) => {
+  try {
+    const { category, limit = 20, page = 1, search } = req.query;
+    
+    console.log(`📦 Products query: category=${category}, limit=${limit}`);
+    
+    // If DB not connected, return empty
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: true,
+        products: [],
+        totalPages: 0,
+        currentPage: 1,
+        total: 0
+      });
+    }
+    
+    // Import Product model
+    const Product = (await import("./models/Product.js")).default;
+    
+    // Build query
+    let query = { 
+      status: 'active', 
+      expiresAt: { $gt: new Date() }
+    };
+    
+    if (category) {
+      query.category = new RegExp(category, 'i');
+    }
+    
+    if (search) {
+      query.$or = [
+        { productName: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const limitNum = parseInt(limit);
+    const skip = (parseInt(page) - 1) * limitNum;
+    
+    const products = await Product.find(query)
+      .populate('seller', 'name email avatar username')
+      .sort({ createdAt: -1 })
+      .limit(limitNum)
+      .skip(skip);
+    
+    const total = await Product.countDocuments(query);
+    
+    res.json({
+      success: true,
+      products: products,
+      totalPages: Math.ceil(total / limitNum),
+      currentPage: parseInt(page),
+      total: total
+    });
+    
+  } catch (error) {
+    console.error(`❌ /api/products error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
+  }
+});
+
+// ✅ Connect to MongoDB
 const connectDB = async () => {
   try {
-    console.log("🔗 Attempting MongoDB connection...");
+    console.log("🔗 Connecting to MongoDB...");
     
     const mongoURI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
     
-    // 5 second timeout
-    const connectionPromise = mongoose.connect(mongoURI, {
+    await mongoose.connect(mongoURI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
     });
-    
-    // Timeout set karo
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('MongoDB connection timeout')), 5000)
-    );
-    
-    await Promise.race([connectionPromise, timeoutPromise]);
     
     console.log("✅ MongoDB Connected!");
     return true;
@@ -75,12 +189,11 @@ const connectDB = async () => {
   }
 };
 
-// ✅ Load routes EVEN IF DB FAILS
+// ✅ Load routes
 const loadRoutes = async () => {
   try {
     console.log("📦 Loading routes...");
     
-    // Import routes (sync - no await needed)
     const authRoutes = (await import("./routes/authRoutes.js")).default;
     const productRoutes = (await import("./routes/productRoutes.js")).default;
     const cartRoutes = (await import("./routes/cartRoutes.js")).default;
@@ -94,7 +207,7 @@ const loadRoutes = async () => {
     app.use("/api/cart", cartRoutes);
     app.use("/api/users", userRoutes);
     app.use("/api/wishlist", wishlistRoutes);
-    app.use("/api/categories", categoryRoutes); // Override the simple one
+    app.use("/api/categories", categoryRoutes);
     
     console.log("✅ All routes loaded!");
     return true;
@@ -105,24 +218,12 @@ const loadRoutes = async () => {
   }
 };
 
-// ✅ Initialize server
+// ✅ Initialize
 const initializeServer = async () => {
-  // Try to connect DB
-  const dbConnected = await connectDB();
-  
-  // Load routes REGARDLESS of DB connection
-  const routesLoaded = await loadRoutes();
-  
-  if (!dbConnected) {
-    console.log("⚠️ Running without database connection");
-  }
-  
-  if (!routesLoaded) {
-    console.log("⚠️ Some routes may not be available");
-  }
+  await connectDB();
+  await loadRoutes();
 };
 
-// Start initialization
 initializeServer();
 
 // ✅ 404 Handler
@@ -130,16 +231,28 @@ app.use((req, res) => {
   console.log(`❌ 404: ${req.method} ${req.url}`);
   res.status(404).json({
     success: false,
-    message: `Route ${req.method} ${req.url} not found`
+    message: `Route ${req.method} ${req.url} not found`,
+    availableRoutes: [
+      '/',
+      '/api/health',
+      '/api/categories',
+      '/api/products',
+      '/api/products/category/:category',
+      '/api/auth/*',
+      '/api/cart/*',
+      '/api/users/*',
+      '/api/wishlist/*'
+    ]
   });
 });
 
-// ✅ Global Error Handler
+// ✅ Error Handler
 app.use((err, req, res, next) => {
   console.error("💥 Error:", err.message);
   res.status(500).json({
     success: false,
-    message: "Internal server error"
+    message: "Internal server error",
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
