@@ -1,4 +1,4 @@
-// ✅ server.js file mein yeh changes karo:
+// ✅ server.js - UPDATED VERSION (hardcoded route removed)
 
 import express from "express";
 import dotenv from "dotenv";
@@ -38,18 +38,8 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ✅ Categories ALWAYS available
-app.get("/api/categories", (req, res) => {
-  res.json({
-    success: true,
-    categories: [
-      "Mobile Phones", "Laptops", "Tablets", "Smart Watches",
-      "Headphones", "Cameras", "Gaming Consoles", "TVs",
-      "Home Appliances", "Fashion", "Books", "Sports Equipment",
-      "Musical Instruments", "Furniture", "Other"
-    ]
-  });
-});
+// ❌❌❌ HARDCODED CATEGORIES ROUTE REMOVED ❌❌❌
+// Aapke categoryRoutes.js wali route database se categories legi
 
 // ✅ CRITICAL FIX: Add missing route that frontend expects
 app.get("/api/products/category/:category", async (req, res) => {
@@ -207,7 +197,7 @@ const loadRoutes = async () => {
     app.use("/api/cart", cartRoutes);
     app.use("/api/users", userRoutes);
     app.use("/api/wishlist", wishlistRoutes);
-    app.use("/api/categories", categoryRoutes);
+    app.use("/api/categories", categoryRoutes); // ✅ Yeh ab database se categories legi
     
     console.log("✅ All routes loaded!");
     return true;
@@ -235,7 +225,7 @@ app.use((req, res) => {
     availableRoutes: [
       '/',
       '/api/health',
-      '/api/categories',
+      '/api/categories', // ✅ Ab yeh database route hai
       '/api/products',
       '/api/products/category/:category',
       '/api/auth/*',
