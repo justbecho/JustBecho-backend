@@ -1,4 +1,4 @@
-// middleware/adminMiddleware.js
+// middleware/adminMiddleware.js main
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 

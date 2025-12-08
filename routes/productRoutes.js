@@ -1,3 +1,4 @@
+// routes/productRoutes.js main
 import express from "express";
 import {
   createProduct,
@@ -6,28 +7,26 @@ import {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory,
-  testCloudinary
+  getProductsByCategory
 } from "../controllers/productController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import uploadMiddleware from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-// ✅ TEST ROUTE
-router.get("/test-cloudinary", testCloudinary);
+// ✅ SPECIFIC ROUTES FIRST (FIXED ORDER)
+router.get("/my-products", authMiddleware, getUserProducts); // Get user's products - ✅ MUST COME FIRST
+router.get("/category/:category", getProductsByCategory); // Get products by category
 
 // ✅ PUBLIC ROUTES
-router.get("/", getAllProducts);
-router.get("/category/:category", getProductsByCategory);
-router.get("/:id", getProduct);
+router.get("/", getAllProducts); // Get all products with filters
 
-// ✅ PROTECTED ROUTES
-router.use(authMiddleware);
+// ✅ DYNAMIC ROUTES LAST
+router.get("/:id", getProduct); // Get single product - ✅ MUST COME LAST
 
-router.get("/user/my-products", getUserProducts);
-router.post("/", uploadMiddleware, createProduct);
-router.put("/:id", updateProduct);
-router.delete("/:id", deleteProduct);
+// ✅ PROTECTED ROUTES (Require Authentication)
+router.post("/", authMiddleware, uploadMiddleware, createProduct); // Create product
+router.put("/:id", authMiddleware, updateProduct); // Update product
+router.delete("/:id", authMiddleware, deleteProduct); // Delete product
 
 export default router;

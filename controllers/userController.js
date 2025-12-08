@@ -1,4 +1,4 @@
-// controllers/userController.js - NEW FILE
+// controllers/userController.js - NEW FILE main
 import User from "../models/User.js";
 
 // ✅ GET ALL USERS (Admin only)

@@ -1,29 +1,18 @@
+// models/Category.js - UPDATED VERSION
 import mongoose from "mongoose";
-
-const subCategorySchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  items: [{
-    type: String,
-    trim: true
-  }]
-});
 
 const categorySchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
     unique: true,
-    trim: true,
-    index: true
+    trim: true
   },
   description: {
     type: String,
     default: ""
   },
+  // ✅ ADD HREF FIELD
   href: {
     type: String,
     default: ""
@@ -32,22 +21,17 @@ const categorySchema = new mongoose.Schema({
     type: String,
     default: ""
   },
-  subCategories: [subCategorySchema],
+  // ✅ SUB-CATEGORIES ARRAY
+  subCategories: [{
+    title: String,
+    items: [String]
+  }],
   isActive: {
     type: Boolean,
-    default: true,
-    index: true
+    default: true
   }
 }, {
   timestamps: true
-});
-
-// Auto-generate href if not provided
-categorySchema.pre('save', function(next) {
-  if (!this.href || this.href.trim() === '') {
-    this.href = `/categories/${this.name.toLowerCase().replace(/\s+/g, '-')}`;
-  }
-  next();
 });
 
 export default mongoose.model("Category", categorySchema);
