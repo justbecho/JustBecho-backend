@@ -1,54 +1,40 @@
-// middleware/uploadMiddleware.js
+// middleware/uploadMiddleware.js mein yeh changes karo:
+
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Ensure uploads directory exists
-import fs from 'fs';
-const uploadsDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    const baseName = path.basename(file.originalname, ext);
-    cb(null, 'product-' + baseName + '-' + uniqueSuffix + ext);
+// ✅ CLOUDINARY STORAGE DIRECT USE KARO (NO LOCAL FILES)
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'justbecho/products',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
   }
 });
 
-// File filter
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed!'), false);
-  }
-};
-
+// ✅ DIRECT CLOUDINARY UPLOAD
 const upload = multer({
   storage: storage,
-  fileFilter: fileFilter,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  },
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-    files: 5 // Max 5 files
+    fileSize: 5 * 1024 * 1024 // 5MB
   }
 });
 
-// ✅ Better error handling for multer
+// ✅ SIMPLE UPLOAD MIDDLEWARE
 const uploadMiddleware = (req, res, next) => {
   upload.array('images', 5)(req, res, function (err) {
     if (err instanceof multer.MulterError) {
-      // Multer-specific errors
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           success: false,
@@ -61,14 +47,7 @@ const uploadMiddleware = (req, res, next) => {
           message: 'Too many files. Maximum 5 images allowed.'
         });
       }
-      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-        return res.status(400).json({
-          success: false,
-          message: 'Unexpected field. Please use "images" as field name.'
-        });
-      }
     } else if (err) {
-      // Other errors
       return res.status(400).json({
         success: false,
         message: err.message
