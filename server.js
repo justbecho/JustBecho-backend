@@ -1,9 +1,11 @@
+// server.js - UPDATED VERSION
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import passport from "passport";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { v2 as cloudinary } from 'cloudinary';
 
 // Load environment variables FIRST
 dotenv.config();
@@ -19,6 +21,21 @@ console.log("✅ Telegram Token Hardcoded");
 if (!process.env.MONGODB_URI) {
   process.env.MONGODB_URI = "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/?appName=justbecho-cluster";
 }
+
+// ✅ CONFIGURE CLOUDINARY PROPERLY
+console.log('☁️ Initializing Cloudinary...');
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
+});
+
+console.log('☁️ Cloudinary Config Status:', {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? '✅ Set' : '❌ Missing',
+  api_key: process.env.CLOUDINARY_API_KEY ? '✅ Set' : '❌ Missing',
+  api_secret: process.env.CLOUDINARY_API_SECRET ? '✅ Set' : '❌ Missing'
+});
 
 // Import configurations
 import "./config/googleAuth.js";
@@ -41,7 +58,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ SIMPLIFIED CORS Configuration - NO app.options('*')
+// ✅ CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'https://just-becho-frontend.vercel.app',
@@ -54,7 +71,6 @@ const allowedOrigins = [
 
 console.log('🌐 CORS Allowed Origins:', allowedOrigins.length);
 
-// ✅ SIMPLE CORS middleware (remove complex origin function)
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
@@ -64,18 +80,19 @@ app.use(cors({
 }));
 
 // ✅ Body parsing middleware
-app.use(express.json({ 
-  limit: '50mb'
-}));
-
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '50mb'
-}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ✅ Request logging middleware
 app.use((req, res, next) => {
+  const startTime = Date.now();
   console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    console.log(`✅ ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+  });
+  
   next();
 });
 
@@ -84,10 +101,6 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize passport
 app.use(passport.initialize());
-
-// ✅ Cloudinary configuration check
-console.log('☁️ Cloudinary Config Check:');
-console.log('   CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ Set' : '❌ Missing');
 
 // ✅ Routes
 app.use("/api/auth", authRoutes);
@@ -106,7 +119,10 @@ app.get("/api/health", (req, res) => {
     services: {
       database: 'connected',
       googleOAuth: 'configured',
-      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? 'configured' : 'not configured'
+      cloudinary: {
+        configured: !!process.env.CLOUDINARY_CLOUD_NAME,
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'not set'
+      }
     }
   });
 });
@@ -116,7 +132,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.1.1",
+    version: "2.2.0",
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -125,6 +141,9 @@ app.get("/", (req, res) => {
       categories: "/api/categories",
       cart: "/api/cart",
       health: "/api/health"
+    },
+    services: {
+      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? 'active' : 'inactive'
     }
   });
 });
@@ -141,10 +160,12 @@ app.use((req, res) => {
 // ✅ Global error handler
 app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
+  console.error('Stack:', error.stack);
   
   res.status(error.status || 500).json({
     success: false,
-    message: error.message || 'Internal server error'
+    message: error.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
 
@@ -173,7 +194,7 @@ const createAdminUser = async () => {
       console.log('🎯 Auto-created admin user');
     }
   } catch (error) {
-    console.log('⚠️ Admin creation skipped');
+    console.log('⚠️ Admin creation skipped:', error.message);
   }
 };
 
@@ -182,7 +203,7 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.1.1              ║
+║                  🚀 JUST BECHO SERVER 2.2.0              ║
 ╚══════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
@@ -190,6 +211,9 @@ app.listen(PORT, () => {
   ✅ Environment: ${process.env.NODE_ENV || 'development'}
   ✅ API URL: http://localhost:${PORT}
   ✅ Database: Connected ✅
+
+☁️ CLOUDINARY STATUS:
+  ${process.env.CLOUDINARY_CLOUD_NAME ? '✅ Configured' : '❌ Not Configured'}
 
 🌐 CORS CONFIGURATION:
   ✅ ${allowedOrigins.length} allowed origins

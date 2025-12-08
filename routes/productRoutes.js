@@ -1,4 +1,4 @@
-// routes/productRoutes.js - FIXED VERSION
+// routes/productRoutes.js - UPDATED VERSION
 import express from "express";
 import {
   createProduct,
@@ -9,12 +9,16 @@ import {
   getAllProducts,
   getProductsByCategory,
   getFeaturedProducts,
-  searchProducts
+  searchProducts,
+  testCloudinary
 } from "../controllers/productController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import uploadMiddleware from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
+
+// ✅ TEST ENDPOINTS
+router.get("/test/cloudinary", testCloudinary);
 
 // ✅ SPECIFIC ROUTES FIRST
 router.get("/my-products", authMiddleware, getUserProducts);
@@ -50,6 +54,11 @@ router.post("/debug",
         hasFiles: !!req.files,
         bodyKeys: req.body ? Object.keys(req.body) : [],
         filesCount: req.files ? req.files.length : 0,
+        files: req.files ? req.files.map(f => ({
+          name: f.originalname,
+          size: f.size,
+          mimetype: f.mimetype
+        })) : [],
         headers: {
           'content-type': req.headers['content-type'],
           'content-length': req.headers['content-length']

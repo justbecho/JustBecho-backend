@@ -3,17 +3,7 @@ import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ CLOUDINARY CONFIG CHECK
-const checkCloudinaryConfig = () => {
-  const hasConfig = process.env.CLOUDINARY_CLOUD_NAME && 
-                   process.env.CLOUDINARY_API_KEY && 
-                   process.env.CLOUDINARY_API_SECRET;
-  
-  console.log('☁️ Cloudinary Config:', hasConfig ? '✅ Ready' : '❌ Missing');
-  return hasConfig;
-};
-
-// ✅ CREATE PRODUCT - ROBUST VERSION
+// ✅ CREATE PRODUCT - FIXED VERSION
 const createProduct = async (req, res) => {
   console.log('=== 🚨 CREATE PRODUCT START ===');
   
@@ -97,11 +87,19 @@ const createProduct = async (req, res) => {
     // ✅ UPLOAD IMAGES
     console.log('🖼️ Starting image upload...');
     const imageUrls = [];
+    const cloudinaryConfig = {
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    };
 
-    // Check if Cloudinary is configured
-    const cloudinaryReady = checkCloudinaryConfig();
+    const isCloudinaryConfigured = cloudinaryConfig.cloud_name && 
+                                   cloudinaryConfig.api_key && 
+                                   cloudinaryConfig.api_secret;
+
+    console.log('☁️ Cloudinary configured:', isCloudinaryConfigured);
     
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       try {
         if (!file.buffer) {
           console.log('⚠️ File has no buffer');
@@ -110,18 +108,20 @@ const createProduct = async (req, res) => {
 
         let imageUrl = '';
         
-        if (cloudinaryReady) {
+        if (isCloudinaryConfigured) {
           // Upload to Cloudinary
           const b64 = Buffer.from(file.buffer).toString('base64');
           const dataURI = `data:${file.mimetype};base64,${b64}`;
           
+          console.log(`📤 Uploading image ${index + 1}/${files.length} to Cloudinary...`);
+          
           const result = await cloudinary.uploader.upload(dataURI, {
             folder: 'justbecho/products',
-            resource_type: 'auto'
+            resource_type: 'image'
           });
           
           imageUrl = result.secure_url;
-          console.log(`✅ Cloudinary upload: ${file.originalname}`);
+          console.log(`✅ Cloudinary upload successful: ${file.originalname}`);
         } else {
           // Fallback to placeholder
           const placeholders = [
@@ -130,7 +130,7 @@ const createProduct = async (req, res) => {
             'https://images.unsplash.com/photo-1482049016688-2d3e1b311543'
           ];
           imageUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
-          console.log(`⚠️ Using placeholder for: ${file.originalname}`);
+          console.log(`⚠️ Cloudinary not configured. Using placeholder for: ${file.originalname}`);
         }
         
         imageUrls.push({
@@ -140,8 +140,22 @@ const createProduct = async (req, res) => {
         });
         
       } catch (uploadError) {
-        console.error(`❌ Image upload failed:`, uploadError.message);
-        // Continue with other images
+        console.error(`❌ Image ${index + 1} upload failed:`, uploadError.message);
+        
+        // If Cloudinary error, use placeholder
+        const placeholders = [
+          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
+          'https://images.unsplash.com/photo-1565958011703-44f9829ba187'
+        ];
+        const fallbackUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
+        
+        imageUrls.push({
+          url: fallbackUrl,
+          publicId: null,
+          isPrimary: imageUrls.length === 0
+        });
+        
+        console.log(`✅ Using fallback image for ${file.originalname}`);
       }
     }
 
@@ -436,7 +450,14 @@ const updateProduct = async (req, res) => {
       
       for (const file of req.files) {
         try {
-          if (checkCloudinaryConfig() && file.buffer) {
+          const cloudinaryConfig = {
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET
+          };
+
+          if (cloudinaryConfig.cloud_name && cloudinaryConfig.api_key && 
+              cloudinaryConfig.api_secret && file.buffer) {
             const b64 = Buffer.from(file.buffer).toString('base64');
             const dataURI = `data:${file.mimetype};base64,${b64}`;
             
@@ -585,6 +606,71 @@ const searchProducts = async (req, res) => {
   }
 };
 
+// ✅ TEST CLOUDINARY ENDPOINT
+const testCloudinary = async (req, res) => {
+  try {
+    const cloudinaryConfig = {
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    };
+
+    const isConfigured = cloudinaryConfig.cloud_name && 
+                         cloudinaryConfig.api_key && 
+                         cloudinaryConfig.api_secret;
+
+    if (!isConfigured) {
+      return res.json({
+        success: false,
+        message: 'Cloudinary not configured',
+        env_variables: {
+          CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || 'not set',
+          CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'set (hidden)' : 'not set',
+          CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? 'set (hidden)' : 'not set'
+        }
+      });
+    }
+
+    // Test upload
+    const testImage = 'https://res.cloudinary.com/demo/image/upload/sample.jpg';
+    
+    try {
+      const result = await cloudinary.uploader.upload(testImage, {
+        folder: 'justbecho/test'
+      });
+
+      res.json({
+        success: true,
+        message: 'Cloudinary is working!',
+        test: {
+          uploaded: true,
+          url: result.secure_url,
+          public_id: result.public_id
+        },
+        config: {
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key_set: !!process.env.CLOUDINARY_API_KEY,
+          api_secret_set: !!process.env.CLOUDINARY_API_SECRET
+        }
+      });
+    } catch (uploadError) {
+      res.status(500).json({
+        success: false,
+        message: 'Cloudinary upload failed',
+        error: uploadError.message,
+        config: cloudinaryConfig
+      });
+    }
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message
+    });
+  }
+};
+
 // ✅ EXPORT ALL FUNCTIONS
 export {
   createProduct,
@@ -595,5 +681,6 @@ export {
   getAllProducts,
   getProductsByCategory,
   getFeaturedProducts,
-  searchProducts
+  searchProducts,
+  testCloudinary
 };
