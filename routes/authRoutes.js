@@ -11,11 +11,23 @@ import {
   updateProfile,
   updateBankDetails,
   getSellerStatus
-} from "../controllers/authController.js"; // ✅ Import all controller functions
+} from "../controllers/authController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import User from "../models/User.js";
 
 const router = express.Router();
+
+// ✅ Environment-based URLs
+const isProduction = process.env.NODE_ENV === 'production';
+const FRONTEND_URL = process.env.FRONTEND_URL || 
+  (isProduction ? 'https://just-becho-frontend.vercel.app' : 'http://localhost:3000');
+const BACKEND_URL = process.env.BACKEND_URL ||
+  (isProduction ? 'https://just-becho-backend.vercel.app' : 'http://localhost:5000');
+
+console.log('🌐 Environment Configuration:');
+console.log('   Production:', isProduction);
+console.log('   Frontend URL:', FRONTEND_URL);
+console.log('   Backend URL:', BACKEND_URL);
 
 // ✅ AUTH ROUTES
 router.post("/signup", signup);
@@ -24,13 +36,13 @@ router.get("/me", authMiddleware, getMe);
 router.post("/complete-profile", authMiddleware, completeProfile);
 router.get("/profile-status", authMiddleware, checkProfileStatus);
 
-// ✅ CONVERT BUYER TO SELLER (USING CONTROLLER FUNCTION)
+// ✅ CONVERT BUYER TO SELLER
 router.put("/convert-to-seller", authMiddleware, convertToSeller);
 
 // ✅ UPDATE PROFILE
 router.put("/profile", authMiddleware, updateProfile);
 
-// ✅ UPDATE BANK DETAILS (FOR SELLERS)
+// ✅ UPDATE BANK DETAILS
 router.put("/bank-details", authMiddleware, updateBankDetails);
 
 // ✅ GET SELLER STATUS
@@ -48,14 +60,13 @@ router.get('/profile/check', authMiddleware, async (req, res) => {
       });
     }
 
-    // Clean username helper function
     const cleanUsername = (username) => {
       if (!username) return null;
       
       let clean = username
-        .replace(/@justbecho/gi, '')  // Remove @justbecho
-        .replace(/@@/g, '@')          // Fix double @@
-        .replace(/^@+/, '@');         // Ensure starts with single @
+        .replace(/@justbecho/gi, '')
+        .replace(/@@/g, '@')
+        .replace(/^@+/, '@');
       
       if (!clean.startsWith('@')) {
         clean = '@' + clean;
@@ -80,7 +91,7 @@ router.get('/profile/check', authMiddleware, async (req, res) => {
         sellerVerified: user.sellerVerified,
         sellerVerificationStatus: user.sellerVerificationStatus,
         verificationId: user.verificationId,
-        username: cleanedUsername, // ✅ Send cleaned username
+        username: cleanedUsername,
         bankDetails: user.bankDetails
       },
       requiresProfile: !user.profileCompleted
@@ -99,14 +110,13 @@ router.get("/dashboard", authMiddleware, (req, res) => {
   try {
     const user = req.user;
     
-    // Clean username helper function
     const cleanUsername = (username) => {
       if (!username) return null;
       
       let clean = username
-        .replace(/@justbecho/gi, '')  // Remove @justbecho
-        .replace(/@@/g, '@')          // Fix double @@
-        .replace(/^@+/, '@');         // Ensure starts with single @
+        .replace(/@justbecho/gi, '')
+        .replace(/@@/g, '@')
+        .replace(/^@+/, '@');
       
       if (!clean.startsWith('@')) {
         clean = '@' + clean;
@@ -117,13 +127,12 @@ router.get("/dashboard", authMiddleware, (req, res) => {
 
     const cleanedUsername = cleanUsername(user.username);
 
-    // Common dashboard data for all roles
     const dashboardData = {
       success: true,
       message: `Welcome to Dashboard, ${user.name || user.email}`,
       user: {
         ...user,
-        username: cleanedUsername // ✅ Send cleaned username
+        username: cleanedUsername
       },
       commonFeatures: [
         'Profile Management',
@@ -133,7 +142,6 @@ router.get("/dashboard", authMiddleware, (req, res) => {
       ]
     };
 
-    // Role-specific features add karo
     if (user.role === 'seller') {
       dashboardData.sellerFeatures = [
         'Add Products',
@@ -142,7 +150,7 @@ router.get("/dashboard", authMiddleware, (req, res) => {
         'Track Earnings'
       ];
       dashboardData.sellerVerified = user.sellerVerified;
-      dashboardData.username = cleanedUsername; // ✅ Clean username
+      dashboardData.username = cleanedUsername;
     } else if (user.role === 'influencer') {
       dashboardData.influencerFeatures = [
         'View Campaigns',
@@ -162,7 +170,7 @@ router.get("/dashboard", authMiddleware, (req, res) => {
   }
 });
 
-// ✅ UPDATE PROFILE FOR ALL USERS (DEPRECATED - USE /profile INSTEAD)
+// ✅ UPDATE PROFILE FOR ALL USERS
 router.put("/profile/update", authMiddleware, async (req, res) => {
   try {
     const { name, phone, address } = req.body;
@@ -179,14 +187,13 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
       { new: true }
     ).select('-password');
 
-    // Clean username helper function
     const cleanUsername = (username) => {
       if (!username) return null;
       
       let clean = username
-        .replace(/@justbecho/gi, '')  // Remove @justbecho
-        .replace(/@@/g, '@')          // Fix double @@
-        .replace(/^@+/, '@');         // Ensure starts with single @
+        .replace(/@justbecho/gi, '')
+        .replace(/@@/g, '@')
+        .replace(/^@+/, '@');
       
       if (!clean.startsWith('@')) {
         clean = '@' + clean;
@@ -207,7 +214,7 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
         phone: user.phone,
         address: user.address,
         role: user.role,
-        username: cleanedUsername, // ✅ Send cleaned username
+        username: cleanedUsername,
         profileCompleted: user.profileCompleted,
         sellerVerified: user.sellerVerified
       }
@@ -222,26 +229,64 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ FIXED GOOGLE AUTH ROUTES
-router.get("/google", passport.authenticate("google", { 
-  scope: ["email", "profile"] 
-}));
+// ✅ GOOGLE AUTH DEBUG ROUTE
+router.get('/google/debug', (req, res) => {
+  res.json({
+    clientId: process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing',
+    callbackUrl: process.env.GOOGLE_CALLBACK_URL || '❌ Not set',
+    frontendUrl: FRONTEND_URL,
+    backendUrl: BACKEND_URL,
+    environment: process.env.NODE_ENV || 'development',
+    googleAuthUrl: `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.GOOGLE_CALLBACK_URL || '')}&response_type=code&scope=email%20profile&access_type=offline&prompt=consent`
+  });
+});
 
+// ✅ GOOGLE AUTH ROUTES - FIXED FOR VERCEL
+router.get("/google", 
+  (req, res, next) => {
+    console.log('🔍 Google OAuth Initiated');
+    console.log('   Request from:', req.get('origin'));
+    console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing');
+    console.log('   Callback URL:', process.env.GOOGLE_CALLBACK_URL || 'Not set');
+    console.log('   Frontend URL:', FRONTEND_URL);
+    next();
+  },
+  passport.authenticate("google", { 
+    scope: ["email", "profile"],
+    accessType: 'offline',
+    prompt: 'consent'
+  })
+);
+
+// ✅ GOOGLE CALLBACK - FIXED REDIRECTS
 router.get(
   "/google/callback",
+  (req, res, next) => {
+    console.log('🔄 Google Callback Hit');
+    console.log('   Query params:', req.query);
+    console.log('   Code received:', req.query.code ? '✅ Yes' : '❌ No');
+    console.log('   Error:', req.query.error || 'None');
+    console.log('   State:', req.query.state || 'None');
+    next();
+  },
   passport.authenticate("google", { 
     session: false,
-    failureRedirect: "http://localhost:3000/auth/error?message=auth_failed" 
+    failureRedirect: `${FRONTEND_URL}/auth/error?message=auth_failed`
   }),
   async (req, res) => {
     try {
       const user = req.user;
       console.log('✅ Google auth successful for:', user.email);
+      console.log('   Profile completed:', user.profileCompleted);
+      console.log('   User role:', user.role);
+      console.log('   Username:', user.username);
 
+      // Update last login
       await User.findByIdAndUpdate(user._id, { 
         lastLogin: new Date() 
       });
 
+      // Generate JWT token
       const tokenPayload = {
         userId: user._id.toString(),
         email: user.email
@@ -253,18 +298,14 @@ router.get(
         { expiresIn: "7d" }
       );
 
-      console.log('📋 User profile completed:', user.profileCompleted);
-      console.log('🎭 User role:', user.role);
-      console.log('👤 Username:', user.username);
-
-      // Clean username before redirecting
+      // Clean username
       const cleanUsername = (username) => {
         if (!username) return null;
         
         let clean = username
-          .replace(/@justbecho/gi, '')  // Remove @justbecho
-          .replace(/@@/g, '@')          // Fix double @@
-          .replace(/^@+/, '@');         // Ensure starts with single @
+          .replace(/@justbecho/gi, '')
+          .replace(/@@/g, '@')
+          .replace(/^@+/, '@');
         
         if (!clean.startsWith('@')) {
           clean = '@' + clean;
@@ -275,26 +316,29 @@ router.get(
 
       const cleanedUsername = cleanUsername(user.username);
 
-      // Agar profile complete nahi hai toh complete-profile pe redirect karo
-      let redirectUrl = `http://localhost:3000/?token=${token}`;
+      // Determine redirect URL
+      let redirectUrl = `${FRONTEND_URL}/`;
       
       if (!user.profileCompleted) {
-        redirectUrl = `http://localhost:3000/complete-profile?token=${token}`;
+        redirectUrl = `${FRONTEND_URL}/complete-profile`;
         console.log('🔄 Redirecting to complete profile');
       } else {
         console.log('🚀 Redirecting to home page');
       }
       
-      // Add username to URL if exists
+      // Add token and username to URL
+      redirectUrl += `?token=${token}`;
+      
       if (cleanedUsername) {
         redirectUrl += `&username=${encodeURIComponent(cleanedUsername)}`;
       }
       
+      console.log('   Final redirect URL:', redirectUrl);
       res.redirect(redirectUrl);
       
     } catch (error) {
       console.error('❌ Google auth callback error:', error);
-      res.redirect('http://localhost:3000/auth/error?message=server_error');
+      res.redirect(`${FRONTEND_URL}/auth/error?message=server_error`);
     }
   }
 );
@@ -325,18 +369,15 @@ router.get("/google/user", authMiddleware, async (req, res) => {
     }
 
     console.log('✅ User found:', user.email);
-    console.log('📋 Profile completed:', user.profileCompleted);
-    console.log('🎭 User role:', user.role);
-    console.log('👤 Original username:', user.username);
 
-    // Clean username helper function
+    // Clean username
     const cleanUsername = (username) => {
       if (!username) return null;
       
       let clean = username
-        .replace(/@justbecho/gi, '')  // Remove @justbecho
-        .replace(/@@/g, '@')          // Fix double @@
-        .replace(/^@+/, '@');         // Ensure starts with single @
+        .replace(/@justbecho/gi, '')
+        .replace(/@@/g, '@')
+        .replace(/^@+/, '@');
       
       if (!clean.startsWith('@')) {
         clean = '@' + clean;
@@ -346,7 +387,6 @@ router.get("/google/user", authMiddleware, async (req, res) => {
     };
 
     const cleanedUsername = cleanUsername(user.username);
-    console.log('👤 Cleaned username:', cleanedUsername);
     
     res.json({
       success: true,
@@ -354,7 +394,7 @@ router.get("/google/user", authMiddleware, async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name || user.email.split('@')[0],
-        username: cleanedUsername, // ✅ Send cleaned username
+        username: cleanedUsername,
         role: user.role,
         profileCompleted: user.profileCompleted,
         instaId: user.instaId,
@@ -389,7 +429,6 @@ router.get("/check-username/:username", async (req, res) => {
     // Remove @ prefix for search
     const searchUsername = username.replace(/^@+/, '');
     
-    // Check if username exists
     const existingUser = await User.findOne({ 
       username: { $regex: new RegExp(`^${searchUsername}$`, 'i') }
     });
