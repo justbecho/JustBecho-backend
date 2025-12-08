@@ -1,59 +1,62 @@
-// models/Product.js - COMPLETE FIXED VERSION
 import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema({
-  // Basic Product Information
+  // Product Details
   productName: {
     type: String,
-    required: true,
-    trim: true
+    required: [true, "Product name is required"],
+    trim: true,
+    maxlength: [100, "Product name cannot exceed 100 characters"]
   },
+  
   brand: {
     type: String,
-    required: true,
+    required: [true, "Brand is required"],
     trim: true
   },
+  
   category: {
     type: String,
-    required: true
+    required: [true, "Category is required"],
+    trim: true
   },
+  
   productType: {
     type: String,
-    required: true,
+    required: [true, "Product type is required"],
     trim: true
   },
-  purchaseYear: {
-    type: Number,
-    default: null
-  },
+  
   condition: {
     type: String,
-    required: true
+    required: [true, "Condition is required"],
+    enum: ['New', 'Like New', 'Good', 'Fair', 'Poor']
   },
+  
   description: {
     type: String,
-    required: true,
-    trim: true
+    required: [true, "Description is required"],
+    trim: true,
+    maxlength: [1000, "Description cannot exceed 1000 characters"]
   },
-
-  // Pricing Information
+  
+  // Pricing
   askingPrice: {
     type: Number,
-    required: true,
-    min: 1
+    required: [true, "Asking price is required"],
+    min: [1, "Price must be at least 1"]
   },
+  
   platformFee: {
     type: Number,
-    required: true,
-    min: 0,
-    max: 100
+    default: 0
   },
+  
   finalPrice: {
     type: Number,
-    required: true,
-    min: 1
+    required: true
   },
-
+  
   // Images
   images: [{
     url: {
@@ -61,67 +64,78 @@ const productSchema = new mongoose.Schema({
       required: true
     },
     publicId: {
-      type: String,
-      required: true
+      type: String
     },
     isPrimary: {
       type: Boolean,
       default: false
     }
   }],
-
-  // Seller Information
+  
+  // Seller Info
   seller: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-
+  
+  sellerName: {
+    type: String,
+    required: true
+  },
+  
+  sellerUsername: {
+    type: String,
+    default: ""
+  },
+  
+  // Additional Info
+  purchaseYear: {
+    type: Number,
+    min: [1900, "Invalid purchase year"],
+    max: [new Date().getFullYear(), "Purchase year cannot be in the future"]
+  },
+  
+  size: {
+    type: String,
+    default: "One Size"
+  },
+  
   // Status
   status: {
     type: String,
-    enum: ['active', 'sold', 'pending', 'draft', 'expired', 'rejected'],
+    enum: ['active', 'sold', 'pending', 'inactive'],
     default: 'active'
   },
-
-  // Additional Fields
+  
+  // Analytics
   views: {
     type: Number,
     default: 0
   },
+  
   likes: {
     type: Number,
     default: 0
   },
-
-  // Timestamps
+  
+  // Expiration
   expiresAt: {
     type: Date,
     default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
   }
-
+  
 }, {
   timestamps: true
 });
 
-// ✅ FIXED: Simple pre-save middleware (NO next parameter)
-productSchema.pre('save', function() {
-  console.log('🔄 Pre-save middleware running...');
-  
-  // Ensure final price is calculated
-  if (this.askingPrice && this.platformFee && (!this.finalPrice || this.isModified('askingPrice'))) {
-    const feeAmount = (this.askingPrice * this.platformFee) / 100;
-    this.finalPrice = Math.ceil(this.askingPrice + feeAmount);
-    console.log('💰 Final price calculated:', this.finalPrice);
-  }
-
-  // Set first image as primary
-  if (this.images && this.images.length > 0 && !this.images.some(img => img.isPrimary)) {
-    this.images[0].isPrimary = true;
-    console.log('🖼️ Primary image set');
-  }
-  
-  console.log('✅ Pre-save middleware completed');
-});
+// Indexes for better performance
+productSchema.index({ seller: 1 });
+productSchema.index({ category: 1 });
+productSchema.index({ status: 1 });
+productSchema.index({ finalPrice: 1 });
+productSchema.index({ createdAt: -1 });
+productSchema.index({ views: -1 });
+productSchema.index({ likes: -1 });
 
 export default mongoose.model("Product", productSchema);
