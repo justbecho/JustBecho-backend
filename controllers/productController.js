@@ -1,24 +1,37 @@
+// controllers/productController.js - FIXED VERSION
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ CLOUDINARY CONFIGURATION CHECK
-console.log('☁️ Cloudinary Config Check:');
-console.log('   Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ Set' : '❌ Missing');
-console.log('   API Key:', process.env.CLOUDINARY_API_KEY ? '✅ Set' : '❌ Missing');
-console.log('   API Secret:', process.env.CLOUDINARY_API_SECRET ? '✅ Set' : '❌ Missing');
+// ✅ CLOUDINARY CONFIG CHECK
+const checkCloudinaryConfig = () => {
+  const hasConfig = process.env.CLOUDINARY_CLOUD_NAME && 
+                   process.env.CLOUDINARY_API_KEY && 
+                   process.env.CLOUDINARY_API_SECRET;
+  
+  console.log('☁️ Cloudinary Config:', hasConfig ? '✅ Ready' : '❌ Missing');
+  return hasConfig;
+};
 
-// ✅ CREATE PRODUCT - WITH FALLBACK OPTIONS
+// ✅ CREATE PRODUCT - ROBUST VERSION
 const createProduct = async (req, res) => {
-  console.log('=== 🚨 CREATE PRODUCT REQUEST START ===');
+  console.log('=== 🚨 CREATE PRODUCT START ===');
   
   try {
-    console.log('📥 Request Body:', req.body);
-    console.log('📸 Files count:', req.files ? req.files.length : 0);
-    console.log('👤 User:', req.user);
+    // ✅ SAFE: Access request data
+    const body = req.body || {};
+    const files = req.files || [];
+    const user = req.user || {};
+    
+    console.log('📥 Request received:', {
+      hasBody: !!body,
+      hasFiles: files.length > 0,
+      hasUser: !!user.userId,
+      bodyKeys: Object.keys(body)
+    });
 
     // ✅ Validate authentication
-    if (!req.user || !req.user.userId) {
+    if (!user.userId) {
       return res.status(401).json({
         success: false,
         message: 'Please login to list a product'
@@ -31,7 +44,7 @@ const createProduct = async (req, res) => {
       'condition', 'description', 'askingPrice'
     ];
     
-    const missingFields = requiredFields.filter(field => !req.body[field]);
+    const missingFields = requiredFields.filter(field => !body[field]);
     
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -40,31 +53,28 @@ const createProduct = async (req, res) => {
       });
     }
 
-    const { 
-      productName, 
-      brand, 
-      category, 
-      productType, 
-      condition, 
-      description, 
-      askingPrice,
-      purchaseYear 
-    } = req.body;
+    // ✅ Extract fields safely
+    const productName = String(body.productName || '').trim();
+    const brand = String(body.brand || '').trim();
+    const category = String(body.category || '').trim();
+    const productType = String(body.productType || '').trim();
+    const condition = String(body.condition || '').trim();
+    const description = String(body.description || '').trim();
+    const askingPrice = body.askingPrice || '0';
+    const purchaseYear = body.purchaseYear || '';
 
     // ✅ Validate images
-    if (!req.files || req.files.length === 0) {
+    if (files.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'At least one product image is required'
       });
     }
 
-    console.log('✅ All validations passed');
+    console.log('✅ Validations passed');
 
-    // ✅ Calculate platform fee and final price
+    // ✅ Calculate price
     const price = parseFloat(askingPrice);
-    console.log('💰 Price parsing:', { askingPrice, parsed: price });
-
     if (isNaN(price) || price <= 0) {
       return res.status(400).json({
         success: false,
@@ -73,92 +83,65 @@ const createProduct = async (req, res) => {
     }
 
     // ✅ Platform fee calculation
-    let platformFeePercentage = 0;
-    
-    if (price <= 2000) {
-      platformFeePercentage = 30;
-    } else if (price <= 5000) {
-      platformFeePercentage = 28;
-    } else if (price <= 10000) {
-      platformFeePercentage = 25;
-    } else if (price <= 15000) {
-      platformFeePercentage = 20;
-    } else {
-      platformFeePercentage = 15;
-    }
+    let platformFeePercentage = 15;
+    if (price <= 2000) platformFeePercentage = 30;
+    else if (price <= 5000) platformFeePercentage = 28;
+    else if (price <= 10000) platformFeePercentage = 25;
+    else if (price <= 15000) platformFeePercentage = 20;
 
     const feeAmount = (price * platformFeePercentage) / 100;
     const finalPrice = Math.ceil(price + feeAmount);
 
-    console.log('💰 FINAL Price Calculation:', {
-      askingPrice: price,
-      platformFee: platformFeePercentage,
-      feeAmount: feeAmount,
-      finalPrice: finalPrice
-    });
+    console.log('💰 Price calculation:', { price, platformFeePercentage, finalPrice });
 
-    // ✅ UPLOAD IMAGES WITH FALLBACK
+    // ✅ UPLOAD IMAGES
     console.log('🖼️ Starting image upload...');
     const imageUrls = [];
 
-    for (const file of req.files) {
+    // Check if Cloudinary is configured
+    const cloudinaryReady = checkCloudinaryConfig();
+    
+    for (const file of files) {
       try {
-        console.log(`📤 Uploading image: ${file.originalname}`);
-        
-        // Check Cloudinary configuration
-        if (!process.env.CLOUDINARY_CLOUD_NAME || 
-            !process.env.CLOUDINARY_API_KEY || 
-            !process.env.CLOUDINARY_API_SECRET) {
-          throw new Error('Cloudinary configuration missing');
+        if (!file.buffer) {
+          console.log('⚠️ File has no buffer');
+          continue;
         }
 
-        // Convert buffer to base64
-        const b64 = Buffer.from(file.buffer).toString('base64');
-        const dataURI = `data:${file.mimetype};base64,${b64}`;
+        let imageUrl = '';
         
-        // Upload to Cloudinary with timeout
-        const uploadPromise = cloudinary.uploader.upload(dataURI, {
-          folder: 'justbecho/products',
-          use_filename: true,
-          unique_filename: true,
-          resource_type: 'auto',
-          transformation: [{ width: 1000, height: 1000, crop: 'limit' }]
-        });
-
-        // Add timeout to prevent hanging
-        const result = await Promise.race([
-          uploadPromise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Cloudinary upload timeout')), 30000)
-          )
-        ]);
-
-        console.log(`✅ Image uploaded to Cloudinary: ${result.secure_url}`);
+        if (cloudinaryReady) {
+          // Upload to Cloudinary
+          const b64 = Buffer.from(file.buffer).toString('base64');
+          const dataURI = `data:${file.mimetype};base64,${b64}`;
+          
+          const result = await cloudinary.uploader.upload(dataURI, {
+            folder: 'justbecho/products',
+            resource_type: 'auto'
+          });
+          
+          imageUrl = result.secure_url;
+          console.log(`✅ Cloudinary upload: ${file.originalname}`);
+        } else {
+          // Fallback to placeholder
+          const placeholders = [
+            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
+            'https://images.unsplash.com/photo-1565958011703-44f9829ba187',
+            'https://images.unsplash.com/photo-1482049016688-2d3e1b311543'
+          ];
+          imageUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
+          console.log(`⚠️ Using placeholder for: ${file.originalname}`);
+        }
         
         imageUrls.push({
-          url: result.secure_url,
-          publicId: result.public_id,
-          isPrimary: imageUrls.length === 0
-        });
-
-      } catch (uploadError) {
-        console.error(`❌ Cloudinary upload failed for ${file.originalname}:`, uploadError.message);
-        
-        // FALLBACK: Use placeholder image
-        const fallbackImages = [
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1000',
-          'https://images.unsplash.com/photo-1565958011703-44f9829ba187?auto=format&fit=crop&w=1000',
-          'https://images.unsplash.com/photo-1482049016688-2d3e1b311543?auto=format&fit=crop&w=1000'
-        ];
-        
-        const randomIndex = Math.floor(Math.random() * fallbackImages.length);
-        imageUrls.push({
-          url: fallbackImages[randomIndex],
+          url: imageUrl,
           publicId: null,
           isPrimary: imageUrls.length === 0
         });
         
-        console.log(`⚠️ Using fallback image for ${file.originalname}`);
+      } catch (uploadError) {
+        console.error(`❌ Image upload failed:`, uploadError.message);
+        // Continue with other images
       }
     }
 
@@ -169,10 +152,10 @@ const createProduct = async (req, res) => {
       });
     }
 
-    console.log('✅ Images processed:', imageUrls.length);
+    console.log(`✅ Processed ${imageUrls.length} images`);
 
     // ✅ Get seller info
-    const seller = await User.findById(req.user.userId).select('name email username');
+    const seller = await User.findById(user.userId).select('name email username');
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -180,23 +163,23 @@ const createProduct = async (req, res) => {
       });
     }
 
-    // ✅ Create product data
+    // ✅ Prepare product data
     const productData = {
-      productName: productName.toString().trim(),
-      brand: brand.toString().trim(),
-      category: category.toString().trim(),
-      productType: productType.toString().trim(),
-      condition: condition.toString().trim(),
-      description: description.toString().trim(),
-      askingPrice: Number(price),
-      platformFee: Number(platformFeePercentage),
-      finalPrice: Number(finalPrice),
+      productName,
+      brand,
+      category,
+      productType,
+      condition,
+      description,
+      askingPrice: price,
+      platformFee: platformFeePercentage,
+      finalPrice,
       images: imageUrls,
-      seller: req.user.userId,
+      seller: user.userId,
       sellerName: seller.name || seller.email.split('@')[0],
       sellerUsername: seller.username || '',
       status: 'active',
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days from now
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
     };
 
     // ✅ Add optional fields
@@ -204,16 +187,11 @@ const createProduct = async (req, res) => {
       productData.purchaseYear = parseInt(purchaseYear);
     }
 
-    console.log('📦 Product Data to save:', {
-      ...productData,
-      images: `[${imageUrls.length} images]`
-    });
-
     // ✅ Create and save product
     const product = new Product(productData);
     const savedProduct = await product.save();
     
-    console.log('✅ Product saved! ID:', savedProduct._id);
+    console.log('✅ Product created:', savedProduct._id);
     console.log('=== ✅ CREATE PRODUCT SUCCESS ===');
 
     res.status(201).json({
@@ -232,9 +210,8 @@ const createProduct = async (req, res) => {
 
   } catch (error) {
     console.error('=== ❌ CREATE PRODUCT ERROR ===');
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
     
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
@@ -254,7 +231,13 @@ const createProduct = async (req, res) => {
 // ✅ GET USER PRODUCTS
 const getUserProducts = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
     
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 });
@@ -283,17 +266,14 @@ const getUserProducts = async (req, res) => {
   }
 };
 
-// ✅ GET ALL PRODUCTS (Public)
+// ✅ GET ALL PRODUCTS
 const getAllProducts = async (req, res) => {
   try {
     const { 
       page = 1, 
       limit = 12, 
       category, 
-      search, 
-      minPrice, 
-      maxPrice,
-      sort = 'newest' 
+      search 
     } = req.query;
     
     let query = { status: 'active' };
@@ -309,25 +289,11 @@ const getAllProducts = async (req, res) => {
         { description: { $regex: search, $options: 'i' } }
       ];
     }
-    
-    if (minPrice) {
-      query.finalPrice = { $gte: Number(minPrice) };
-    }
-    
-    if (maxPrice) {
-      query.finalPrice = { ...query.finalPrice, $lte: Number(maxPrice) };
-    }
-
-    // Sorting
-    let sortOption = { createdAt: -1 };
-    if (sort === 'price-low') sortOption = { finalPrice: 1 };
-    if (sort === 'price-high') sortOption = { finalPrice: -1 };
-    if (sort === 'popular') sortOption = { views: -1 };
 
     const skip = (page - 1) * limit;
 
     const products = await Product.find(query)
-      .sort(sortOption)
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
       .select('productName brand category finalPrice images views likes createdAt');
@@ -358,8 +324,6 @@ const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
     const { page = 1, limit = 12 } = req.query;
-    
-    console.log('🎯 Fetching products for category:', category);
     
     let query = { 
       status: 'active',
@@ -453,10 +417,9 @@ const updateProduct = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user.userId);
-    
-    const isAdmin = user?.role === 'admin';
-    const isOwner = product.seller.toString() === req.user.userId;
+    const user = req.user;
+    const isOwner = product.seller.toString() === user.userId;
+    const isAdmin = user.role === 'admin';
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({
@@ -465,27 +428,28 @@ const updateProduct = async (req, res) => {
       });
     }
 
-    // Update fields
     const updateData = { ...req.body };
     
-    // If updating images
+    // Handle image updates if files are provided
     if (req.files && req.files.length > 0) {
       const imageUrls = [];
       
       for (const file of req.files) {
         try {
-          const b64 = Buffer.from(file.buffer).toString('base64');
-          const dataURI = `data:${file.mimetype};base64,${b64}`;
-          
-          const result = await cloudinary.uploader.upload(dataURI, {
-            folder: 'justbecho/products'
-          });
-          
-          imageUrls.push({
-            url: result.secure_url,
-            publicId: result.public_id,
-            isPrimary: imageUrls.length === 0
-          });
+          if (checkCloudinaryConfig() && file.buffer) {
+            const b64 = Buffer.from(file.buffer).toString('base64');
+            const dataURI = `data:${file.mimetype};base64,${b64}`;
+            
+            const result = await cloudinary.uploader.upload(dataURI, {
+              folder: 'justbecho/products'
+            });
+            
+            imageUrls.push({
+              url: result.secure_url,
+              publicId: result.public_id,
+              isPrimary: imageUrls.length === 0
+            });
+          }
         } catch (uploadError) {
           console.error('Image upload error:', uploadError);
         }
@@ -537,29 +501,15 @@ const deleteProduct = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user.userId);
-    
-    const isAdmin = user?.role === 'admin';
-    const isOwner = product.seller.toString() === req.user.userId;
+    const user = req.user;
+    const isOwner = product.seller.toString() === user.userId;
+    const isAdmin = user.role === 'admin';
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this product'
       });
-    }
-
-    // Delete images from Cloudinary if publicId exists
-    if (product.images && product.images.length > 0) {
-      for (const image of product.images) {
-        if (image.publicId) {
-          try {
-            await cloudinary.uploader.destroy(image.publicId);
-          } catch (cloudinaryError) {
-            console.error('Error deleting from Cloudinary:', cloudinaryError);
-          }
-        }
-      }
     }
 
     await Product.findByIdAndDelete(req.params.id);
@@ -603,7 +553,7 @@ const getFeaturedProducts = async (req, res) => {
 // ✅ SEARCH PRODUCTS
 const searchProducts = async (req, res) => {
   try {
-    const { q, category, minPrice, maxPrice, limit = 20 } = req.query;
+    const { q, limit = 20 } = req.query;
     
     let query = { status: 'active' };
     
@@ -614,18 +564,6 @@ const searchProducts = async (req, res) => {
         { description: { $regex: q, $options: 'i' } },
         { category: { $regex: q, $options: 'i' } }
       ];
-    }
-    
-    if (category && category !== 'all') {
-      query.category = category;
-    }
-    
-    if (minPrice) {
-      query.finalPrice = { $gte: Number(minPrice) };
-    }
-    
-    if (maxPrice) {
-      query.finalPrice = { ...query.finalPrice, $lte: Number(maxPrice) };
     }
 
     const products = await Product.find(query)

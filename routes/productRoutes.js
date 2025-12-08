@@ -1,3 +1,4 @@
+// routes/productRoutes.js - FIXED VERSION
 import express from "express";
 import {
   createProduct,
@@ -11,7 +12,7 @@ import {
   searchProducts
 } from "../controllers/productController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
-import uploadMiddleware from "../middleware/uploadMiddleware.js"; // Import the middleware
+import uploadMiddleware from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
@@ -30,41 +31,31 @@ router.get("/:id", getProduct);
 // ✅ PROTECTED ROUTES
 router.post("/", 
   authMiddleware,
-  (req, res, next) => {
-    console.log('🛡️ Auth passed, proceeding to upload...');
-    next();
-  },
-  uploadMiddleware, // Use the upload middleware
-  (req, res, next) => {
-    console.log('✅ Upload complete, proceeding to create product...');
-    next();
-  },
+  uploadMiddleware,
   createProduct
 );
 
 router.put("/:id", authMiddleware, updateProduct);
 router.delete("/:id", authMiddleware, deleteProduct);
 
-// ✅ TEST UPLOAD ENDPOINT
-router.post("/test-upload",
+// ✅ DEBUG ENDPOINT
+router.post("/debug", 
   uploadMiddleware,
   (req, res) => {
     try {
-      console.log('🎯 Test upload successful');
-      
       res.json({
         success: true,
-        message: `Received ${req.files?.length || 0} files`,
-        files: req.files?.map(f => ({
-          originalname: f.originalname,
-          size: f.size,
-          mimetype: f.mimetype,
-          fieldname: f.fieldname
-        })),
-        body: req.body
+        message: 'Debug endpoint',
+        hasBody: !!req.body,
+        hasFiles: !!req.files,
+        bodyKeys: req.body ? Object.keys(req.body) : [],
+        filesCount: req.files ? req.files.length : 0,
+        headers: {
+          'content-type': req.headers['content-type'],
+          'content-length': req.headers['content-length']
+        }
       });
     } catch (error) {
-      console.error('Test upload error:', error);
       res.status(500).json({
         success: false,
         message: error.message
