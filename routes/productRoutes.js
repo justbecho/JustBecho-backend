@@ -1,4 +1,4 @@
-// routes/productRoutes.js - UPDATED VERSION
+// routes/productRoutes.js - COMPLETE UPDATED VERSION
 import express from "express";
 import {
   createProduct,
@@ -8,6 +8,8 @@ import {
   deleteProduct,
   getAllProducts,
   getProductsByCategory,
+  getProductsByBrand,
+  getAllBrands, // ✅ Import new function
   getFeaturedProducts,
   searchProducts,
   testCloudinary
@@ -19,6 +21,10 @@ const router = express.Router();
 
 // ✅ TEST ENDPOINTS
 router.get("/test/cloudinary", testCloudinary);
+
+// ✅ BRAND ROUTES
+router.get("/brands/all", getAllBrands); // ✅ Get all brands
+router.get("/brand/:brand", getProductsByBrand); // ✅ Get products by specific brand
 
 // ✅ SPECIFIC ROUTES FIRST
 router.get("/my-products", authMiddleware, getUserProducts);

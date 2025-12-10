@@ -1,9 +1,9 @@
-// controllers/productController.js - FIXED VERSION
+// controllers/productController.js - COMPLETE UPDATED VERSION
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ CREATE PRODUCT - FIXED VERSION
+// ✅ CREATE PRODUCT
 const createProduct = async (req, res) => {
   console.log('=== 🚨 CREATE PRODUCT START ===');
   
@@ -287,6 +287,7 @@ const getAllProducts = async (req, res) => {
       page = 1, 
       limit = 12, 
       category, 
+      brand, // ✅ Added brand parameter
       search 
     } = req.query;
     
@@ -294,6 +295,10 @@ const getAllProducts = async (req, res) => {
     
     if (category && category !== 'all') {
       query.category = { $regex: new RegExp(category, 'i') };
+    }
+    
+    if (brand && brand !== 'all') {
+      query.brand = { $regex: new RegExp(brand, 'i') };
     }
     
     if (search) {
@@ -310,7 +315,7 @@ const getAllProducts = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt');
+      .select('productName brand category finalPrice images views likes createdAt condition');
 
     const total = await Product.countDocuments(query);
 
@@ -337,12 +342,17 @@ const getAllProducts = async (req, res) => {
 const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
-    const { page = 1, limit = 12 } = req.query;
+    const { page = 1, limit = 12, brand } = req.query;
     
     let query = { 
       status: 'active',
       category: { $regex: new RegExp(category, 'i') }
     };
+    
+    // ✅ Added brand filter
+    if (brand && brand !== 'all') {
+      query.brand = { $regex: new RegExp(brand, 'i') };
+    }
 
     const skip = (page - 1) * limit;
 
@@ -350,7 +360,7 @@ const getProductsByCategory = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt');
+      .select('productName brand category finalPrice images views likes createdAt condition');
 
     const total = await Product.countDocuments(query);
 
@@ -367,6 +377,100 @@ const getProductsByCategory = async (req, res) => {
     });
   } catch (error) {
     console.error('Get Products By Category Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ GET PRODUCTS BY BRAND
+const getProductsByBrand = async (req, res) => {
+  try {
+    const { brand } = req.params;
+    const { category, page = 1, limit = 20 } = req.query;
+    
+    console.log('Fetching products for brand:', brand);
+    console.log('Category filter:', category);
+    
+    let query = { 
+      status: 'active',
+      brand: { $regex: new RegExp(brand, 'i') }
+    };
+    
+    // If category is provided, add it to filter
+    if (category && category !== 'all') {
+      query.category = { $regex: new RegExp(category, 'i') };
+    }
+    
+    console.log('Query:', query);
+
+    const skip = (page - 1) * limit;
+
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit))
+      .select('productName brand category finalPrice images views likes createdAt condition');
+
+    const total = await Product.countDocuments(query);
+    
+    console.log('Found products:', products.length);
+
+    res.status(200).json({
+      success: true,
+      brand,
+      category,
+      products,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get Products By Brand Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ GET ALL BRANDS
+const getAllBrands = async (req, res) => {
+  try {
+    const brands = await Product.distinct('brand', { status: 'active' });
+    
+    const brandsWithCount = await Promise.all(
+      brands.map(async (brand) => {
+        const count = await Product.countDocuments({ 
+          brand: { $regex: new RegExp(`^${brand}$`, 'i') },
+          status: 'active'
+        });
+        return {
+          name: brand,
+          count: count
+        };
+      })
+    );
+    
+    // Sort alphabetically
+    const sortedBrands = brandsWithCount.sort((a, b) => 
+      a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+    );
+    
+    // Filter out empty brands
+    const filteredBrands = sortedBrands.filter(b => b.name && b.name.trim() !== '');
+
+    res.status(200).json({
+      success: true,
+      brands: filteredBrands,
+      total: filteredBrands.length
+    });
+  } catch (error) {
+    console.error('Get All Brands Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -556,7 +660,7 @@ const getFeaturedProducts = async (req, res) => {
     })
       .sort({ views: -1, likes: -1 })
       .limit(8)
-      .select('productName brand finalPrice images views likes');
+      .select('productName brand finalPrice images views likes condition');
 
     res.status(200).json({
       success: true,
@@ -574,9 +678,17 @@ const getFeaturedProducts = async (req, res) => {
 // ✅ SEARCH PRODUCTS
 const searchProducts = async (req, res) => {
   try {
-    const { q, limit = 20 } = req.query;
+    const { q, brand, category, limit = 20 } = req.query;
     
     let query = { status: 'active' };
+    
+    if (brand && brand !== 'all') {
+      query.brand = { $regex: new RegExp(brand, 'i') };
+    }
+    
+    if (category && category !== 'all') {
+      query.category = { $regex: new RegExp(category, 'i') };
+    }
     
     if (q) {
       query.$or = [
@@ -590,7 +702,7 @@ const searchProducts = async (req, res) => {
     const products = await Product.find(query)
       .sort({ createdAt: -1 })
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt');
+      .select('productName brand category finalPrice images views likes createdAt condition');
 
     res.status(200).json({
       success: true,
@@ -680,6 +792,8 @@ export {
   deleteProduct,
   getAllProducts,
   getProductsByCategory,
+  getProductsByBrand,
+  getAllBrands, // ✅ New function
   getFeaturedProducts,
   searchProducts,
   testCloudinary

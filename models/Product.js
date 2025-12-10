@@ -1,3 +1,4 @@
+// models/Product.js - OPTIMIZED VERSION
 import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema({
@@ -6,19 +7,22 @@ const productSchema = new mongoose.Schema({
     type: String,
     required: [true, "Product name is required"],
     trim: true,
-    maxlength: [100, "Product name cannot exceed 100 characters"]
+    maxlength: [100, "Product name cannot exceed 100 characters"],
+    index: true
   },
   
   brand: {
     type: String,
     required: [true, "Brand is required"],
-    trim: true
+    trim: true,
+    index: true
   },
   
   category: {
     type: String,
     required: [true, "Category is required"],
-    trim: true
+    trim: true,
+    index: true
   },
   
   productType: {
@@ -30,7 +34,8 @@ const productSchema = new mongoose.Schema({
   condition: {
     type: String,
     required: [true, "Condition is required"],
-    enum: ['New', 'Like New', 'Good', 'Fair', 'Poor']
+    enum: ['New', 'Like New', 'Good', 'Fair', 'Poor'],
+    index: true
   },
   
   description: {
@@ -54,7 +59,8 @@ const productSchema = new mongoose.Schema({
   
   finalPrice: {
     type: Number,
-    required: true
+    required: true,
+    index: true
   },
   
   // Images
@@ -76,7 +82,8 @@ const productSchema = new mongoose.Schema({
   seller: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: true,
+    index: true
   },
   
   sellerName: {
@@ -105,37 +112,59 @@ const productSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['active', 'sold', 'pending', 'inactive'],
-    default: 'active'
+    default: 'active',
+    index: true
   },
   
   // Analytics
   views: {
     type: Number,
-    default: 0
+    default: 0,
+    index: true
   },
   
   likes: {
     type: Number,
-    default: 0
+    default: 0,
+    index: true
   },
   
   // Expiration
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    index: true
   }
   
 }, {
   timestamps: true
 });
 
-// Indexes for better performance
-productSchema.index({ seller: 1 });
-productSchema.index({ category: 1 });
-productSchema.index({ status: 1 });
-productSchema.index({ finalPrice: 1 });
-productSchema.index({ createdAt: -1 });
-productSchema.index({ views: -1 });
-productSchema.index({ likes: -1 });
+// ✅ Compound indexes for better performance
+productSchema.index({ brand: 1, category: 1, status: 1 });
+productSchema.index({ category: 1, brand: 1, status: 1 });
+productSchema.index({ seller: 1, status: 1 });
+productSchema.index({ status: 1, createdAt: -1 });
+productSchema.index({ status: 1, views: -1 });
+productSchema.index({ status: 1, likes: -1 });
+
+// ✅ Text index for search
+productSchema.index(
+  { 
+    productName: 'text', 
+    brand: 'text', 
+    description: 'text',
+    category: 'text'
+  },
+  {
+    weights: {
+      productName: 10,
+      brand: 8,
+      category: 6,
+      description: 3
+    },
+    name: 'product_search_index'
+  }
+);
 
 export default mongoose.model("Product", productSchema);
