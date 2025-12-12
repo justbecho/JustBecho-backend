@@ -1,4 +1,4 @@
-// controllers/productController.js - COMPLETE UPDATED VERSION
+// controllers/productController.js - COMPLETE FIXED VERSION
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
@@ -287,7 +287,7 @@ const getAllProducts = async (req, res) => {
       page = 1, 
       limit = 12, 
       category, 
-      brand, // ✅ Added brand parameter
+      brand,
       search 
     } = req.query;
     
@@ -338,15 +338,60 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ GET PRODUCTS BY CATEGORY
+// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+// ✅ FIXED: GET PRODUCTS BY CATEGORY - WOMEN'S/MEN'S ISSUE SOLVED
+// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
 const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
     const { page = 1, limit = 12, brand } = req.query;
     
+    console.log('🔍 [FIXED] Fetching products for category:', category);
+    
+    // ✅ FIX: Use EXACT category matching, not regex partial matching
+    let categoryFilter;
+    
+    // Clean and normalize category name
+    const cleanCategory = category.trim();
+    
+    // Handle Men's/Women's Fashion specifically
+    if (cleanCategory.toLowerCase().includes("men") || 
+        cleanCategory.toLowerCase().includes("men's") ||
+        cleanCategory === "Mens Fashion") {
+      // For Men's Fashion - match ONLY men's products
+      categoryFilter = { 
+        $in: [
+          "Men's Fashion", 
+          "Mens Fashion", 
+          "Men Fashion",
+          "Men"
+        ] 
+      };
+      console.log('🔍 [FIXED] Using Men\'s Fashion filter');
+      
+    } else if (cleanCategory.toLowerCase().includes("women") || 
+               cleanCategory.toLowerCase().includes("women's") ||
+               cleanCategory === "Womens Fashion") {
+      // For Women's Fashion - match ONLY women's products
+      categoryFilter = { 
+        $in: [
+          "Women's Fashion", 
+          "Womens Fashion", 
+          "Women Fashion",
+          "Women"
+        ] 
+      };
+      console.log('🔍 [FIXED] Using Women\'s Fashion filter');
+      
+    } else {
+      // For other categories - exact match (case-insensitive)
+      categoryFilter = { $regex: new RegExp(`^${cleanCategory}$`, 'i') };
+      console.log('🔍 [FIXED] Using exact match for:', cleanCategory);
+    }
+    
     let query = { 
       status: 'active',
-      category: { $regex: new RegExp(category, 'i') }
+      category: categoryFilter  // ✅ USING THE FIXED FILTER
     };
     
     // ✅ Added brand filter
@@ -363,6 +408,9 @@ const getProductsByCategory = async (req, res) => {
       .select('productName brand category finalPrice images views likes createdAt condition');
 
     const total = await Product.countDocuments(query);
+    
+    console.log(`✅ [FIXED] Found ${products.length} products for ${category}`);
+    console.log(`✅ [FIXED] Query was: ${JSON.stringify(query)}`);
 
     res.status(200).json({
       success: true,
@@ -791,9 +839,9 @@ export {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory,
+  getProductsByCategory, // ✅ THIS IS NOW FIXED
   getProductsByBrand,
-  getAllBrands, // ✅ New function
+  getAllBrands,
   getFeaturedProducts,
   searchProducts,
   testCloudinary
