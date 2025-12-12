@@ -16,14 +16,12 @@ const authMiddleware = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('🔐 Token decoded:', decoded);
 
-    // ✅ PERMANENT FIX: Handle both old and new token structures
+    // ✅ Handle both old and new token structures
     let userId;
     
     if (decoded.userId) {
-      // ✅ New structure: { userId: '...', email: '...' }
       userId = decoded.userId;
     } else if (decoded.id) {
-      // ✅ Old structure: { id: '...' } 
       userId = decoded.id;
     } else {
       throw new Error('Invalid token structure');
@@ -41,30 +39,28 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // ✅ Check if user is active
-    if (!user.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: 'Account is deactivated'
-      });
-    }
-
-    // ✅ PERMANENT FIX: Consistent user object structure with role data
+    // ✅ PERMANENT FIX: Consistent user object structure with ALL DATA
     req.user = {
-      userId: user._id.toString(), // ✅ Always use 'userId'
+      userId: user._id.toString(),
       email: user.email,
       name: user.name || user.email.split('@')[0],
-      role: user.role, // ✅ Include role
-      profileCompleted: user.profileCompleted, // ✅ Include profile status
-    
+      role: user.role, // ✅ This will now show 'admin'
+      profileCompleted: user.profileCompleted,
+      sellerVerified: user.sellerVerified,
+      sellerVerificationStatus: user.sellerVerificationStatus,
+      verificationId: user.verificationId,
+      username: user.username,
+      phone: user.phone,
+      address: user.address,
+      bankDetails: user.bankDetails,
+      instaId: user.instaId
     };
     
     console.log('✅ Auth Middleware - User set:', {
       userId: req.user.userId,
       email: req.user.email,
-      role: req.user.role,
-      profileCompleted: req.user.profileCompleted,
-     
+      role: req.user.role, // ✅ Check if it shows 'admin'
+      name: req.user.name
     });
     
     next();
@@ -92,7 +88,7 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// ✅ OPTIONAL: ROLE-BASED MIDDLEWARE (Additional middleware for specific roles)
+// ✅ OPTIONAL: ROLE-BASED MIDDLEWARE
 export const requireRole = (roles) => {
   return (req, res, next) => {
     try {
@@ -147,7 +143,5 @@ export const requireProfileCompleted = (req, res, next) => {
     });
   }
 };
-
-
 
 export default authMiddleware;

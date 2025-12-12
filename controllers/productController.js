@@ -667,14 +667,11 @@ const deleteProduct = async (req, res) => {
   try {
     console.log('=== 🗑️ DELETE PRODUCT START ===');
     console.log('📥 Product ID:', req.params.id);
-    console.log('👤 User from middleware:', JSON.stringify(req.user, null, 2));
-    console.log('🔑 Headers - Authorization:', req.headers.authorization);
+    console.log('👤 User object:', req.user);
     
-    // 1. Find the product
     const product = await Product.findById(req.params.id);
     
     if (!product) {
-      console.log('❌ Product not found');
       return res.status(404).json({
         success: false,
         message: 'Product not found'
@@ -684,80 +681,48 @@ const deleteProduct = async (req, res) => {
     console.log('✅ Product found:', {
       id: product._id,
       name: product.productName,
-      seller: product.seller,
-      sellerType: typeof product.seller,
-      sellerString: product.seller.toString()
+      seller: product.seller.toString()
     });
     
-    // 2. Get user from middleware
     const user = req.user;
-    console.log('👤 User object details:', {
+    console.log('👤 Current user:', {
       userId: user.userId,
-      userIdType: typeof user.userId,
-      userString: user.userId ? user.userId.toString() : 'null',
       email: user.email,
       role: user.role
     });
     
-    // 3. Compare IDs
-    const productSellerId = product.seller.toString();
-    const currentUserId = user.userId ? user.userId.toString() : null;
+    // ✅ FIX: Check if user is admin OR owner
+    const isOwner = product.seller.toString() === user.userId;
+    const isAdmin = user.role === 'admin'; // ✅ Now this will work
     
-    console.log('🔍 ID COMPARISON:', {
-      productSellerId,
-      currentUserId,
-      areEqual: productSellerId === currentUserId,
-      productSellerLength: productSellerId.length,
-      currentUserLength: currentUserId ? currentUserId.length : 0
-    });
-    
-    // 4. Check authorization
-    const isOwner = productSellerId === currentUserId;
-    const isAdmin = user.role === 'admin';
-    
-    console.log('🔐 AUTHORIZATION CHECK:', {
+    console.log('🔐 Authorization check:', {
       isOwner,
       isAdmin,
-      userRole: user.role,
       canDelete: isOwner || isAdmin
     });
     
     if (!isOwner && !isAdmin) {
-      console.log('❌ AUTHORIZATION FAILED');
-      console.log('Product Seller ID:', productSellerId);
-      console.log('Current User ID:', currentUserId);
-      console.log('Match:', productSellerId === currentUserId);
+      console.log('❌ Not authorized to delete');
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this product'
       });
     }
     
-    // 5. Delete the product
-    console.log('✅ Authorized, deleting product...');
-    const deletedProduct = await Product.findByIdAndDelete(req.params.id);
-    
-    if (deletedProduct) {
-      console.log('✅ Product deleted successfully');
-      res.status(200).json({
-        success: true,
-        message: 'Product deleted successfully'
-      });
-    } else {
-      console.log('❌ Failed to delete product');
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete product'
-      });
+    // ✅ ADMIN SPECIAL LOG
+    if (isAdmin) {
+      console.log('👑 ADMIN ACTION: Deleting product');
     }
     
-    console.log('=== ✅ DELETE PRODUCT END ===');
+    await Product.findByIdAndDelete(req.params.id);
+    
+    res.status(200).json({
+      success: true,
+      message: isAdmin ? 'Product deleted by admin' : 'Product deleted successfully'
+    });
     
   } catch (error) {
-    console.error('=== ❌ DELETE PRODUCT ERROR ===');
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
-    
+    console.error('❌ Delete Product Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message

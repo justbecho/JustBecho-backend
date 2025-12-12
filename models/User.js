@@ -28,12 +28,13 @@ const userSchema = new mongoose.Schema({
     default: null
   },
   
-  // ✅ ROLE SYSTEM FIELDS
+  // ✅ UPDATED: ROLE SYSTEM WITH ADMIN
   role: {
     type: String,
-    enum: ['buyer', 'seller', 'influencer', 'user'],
+    enum: ['user', 'buyer', 'seller', 'influencer', 'admin'], // ✅ 'admin' ADDED
     default: 'user'
   },
+  
   instaId: {
     type: String,
     default: "",
@@ -44,7 +45,7 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   
-  // ✅ SELLER VERIFICATION FIELDS (Simplified)
+  // ✅ SELLER VERIFICATION FIELDS
   sellerVerified: {
     type: Boolean,
     default: false
@@ -68,7 +69,7 @@ const userSchema = new mongoose.Schema({
     default: null
   },
   
-  // ✅ BANK DETAILS FOR SELLERS (Direct field - NOT nested)
+  // ✅ BANK DETAILS FOR SELLERS
   bankDetails: {
     accountNumber: {
       type: String,
@@ -87,7 +88,7 @@ const userSchema = new mongoose.Schema({
     }
   },
   
-  // ✅ PROFILE FIELDS (All users ke liye)
+  // ✅ PROFILE FIELDS
   phone: {
     type: String,
     default: "",

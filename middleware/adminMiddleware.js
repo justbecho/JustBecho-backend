@@ -1,57 +1,40 @@
-// middleware/adminMiddleware.js main
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
 const adminMiddleware = async (req, res, next) => {
   try {
-    // Get token from header
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    console.log('👮 Admin middleware checking...');
     
-    if (!token) {
+    // First, check if auth middleware already ran
+    if (!req.user) {
       return res.status(401).json({
         success: false,
-        message: 'No authentication token, access denied'
+        message: 'Authentication required'
       });
     }
-
-    try {
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.userId = decoded.userId;
-
-      // Find user
-      const user = await User.findById(req.userId);
-      
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-
-      // Check if user is admin
-      if (user.role !== 'admin') {
-        return res.status(403).json({
-          success: false,
-          message: 'Access denied. Admin only.'
-        });
-      }
-
-      // Attach user to request
-      req.user = user;
-      next();
-    } catch (error) {
-      console.error('Token verification error:', error);
-      return res.status(401).json({
+    
+    console.log('👤 User from auth middleware:', {
+      email: req.user.email,
+      role: req.user.role
+    });
+    
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      console.log('❌ Access denied. User role:', req.user.role);
+      return res.status(403).json({
         success: false,
-        message: 'Invalid token'
+        message: 'Access denied. Admin privileges required.'
       });
     }
+    
+    console.log('✅ Admin access granted for:', req.user.email);
+    next();
+    
   } catch (error) {
-    console.error('Admin middleware error:', error);
+    console.error('❌ Admin middleware error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error in authentication'
+      message: 'Server error in admin verification'
     });
   }
 };

@@ -28,9 +28,11 @@ export const signup = async (req, res) => {
 
     await user.save();
 
+    // ✅ UPDATED: Include role in token
     const tokenPayload = {
       userId: user._id.toString(),
-      email: user.email
+      email: user.email,
+      role: user.role // ✅ Added role
     };
 
     const token = jwt.sign(
@@ -90,10 +92,14 @@ export const login = async (req, res) => {
       });
     }
 
+    // ✅ UPDATED: Include role in token payload
     const tokenPayload = {
       userId: user._id.toString(),
-      email: user.email
+      email: user.email,
+      role: user.role // ✅ CRITICAL: Include role!
     };
+
+    console.log('🔐 Token payload being created:', tokenPayload);
 
     const token = jwt.sign(
       tokenPayload,
@@ -101,7 +107,7 @@ export const login = async (req, res) => {
       { expiresIn: "30d" }
     );
 
-    console.log("✅ Login successful for:", email);
+    console.log("✅ Login successful for:", email, "Role:", user.role);
     
     let redirectTo = '/dashboard';
     
@@ -118,9 +124,9 @@ export const login = async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name || user.email.split('@')[0],
-        username: user.username, // Send as-is "name@justbecho"
+        username: user.username,
         profileCompleted: user.profileCompleted,
-        role: user.role,
+        role: user.role, // ✅ This should show 'admin' for admin user
         instaId: user.instaId,
         sellerVerified: user.sellerVerified,
         sellerVerificationStatus: user.sellerVerificationStatus,
@@ -141,28 +147,20 @@ export const login = async (req, res) => {
   }
 };
 
-// ✅ NEW: Generate username "name@justbecho"
+// ✅ Generate username "name@justbecho"
 const generateSellerUsername = async (name, userId) => {
   try {
-    // Create base username from name
     const baseUsername = name.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
-    
-    // Remove any @ symbols from the start
     let cleanBase = baseUsername.replace(/^@+/, '');
-    
-    // Take first 15 characters max
     cleanBase = cleanBase.substring(0, 15);
     
-    // ✅ IMPORTANT: Generate "name@justbecho" format
     let username = `${cleanBase}@justbecho`;
     
-    // Check if username exists
     const existingUser = await User.findOne({ 
       username: username,
       _id: { $ne: userId }
     });
 
-    // If exists, add numbers until unique
     if (existingUser) {
       let counter = 1;
       while (existingUser) {
@@ -173,7 +171,6 @@ const generateSellerUsername = async (name, userId) => {
         });
         if (!checkUser) break;
         counter++;
-        // Safety break
         if (counter > 1000) {
           username = `${cleanBase}${Date.now().toString().slice(-6)}@justbecho`;
           break;
@@ -181,35 +178,30 @@ const generateSellerUsername = async (name, userId) => {
       }
     }
 
-    return username; // Returns "name@justbecho" format
+    return username;
     
   } catch (error) {
     console.error('Error generating username:', error);
-    // Fallback
     const cleanBase = name.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '').substring(0, 10);
     return `${cleanBase}${Date.now().toString().slice(-4)}@justbecho`;
   }
 };
 
-// ✅ NEW: Ensure username is in "name@justbecho" format
+// ✅ Ensure username is in "name@justbecho" format
 const ensureJustbechoFormat = (username) => {
   if (!username) return null;
   
-  // Remove any leading @
   let clean = username.replace(/^@+/, '');
   
-  // If already ends with @justbecho, return as-is
   if (clean.endsWith('@justbecho')) {
     return clean;
   }
   
-  // If contains @justbecho elsewhere, fix it
   if (clean.includes('@justbecho')) {
     const namePart = clean.replace('@justbecho', '');
     return `${namePart}@justbecho`;
   }
   
-  // Add @justbecho suffix
   return `${clean}@justbecho`;
 };
 
@@ -226,7 +218,6 @@ export const completeProfile = async (req, res) => {
     } = req.body;
 
     console.log('📝 Completing profile for user:', userId);
-    console.log('📋 Received data:', { role, name, phone, address, instaId, bankDetails });
 
     if (!role || !name || !phone || !address) {
       return res.status(400).json({
@@ -322,9 +313,8 @@ export const completeProfile = async (req, res) => {
         accountName: bankDetails.accountName
       };
       
-      // ✅ FIXED: Generate username "name@justbecho"
       const username = await generateSellerUsername(name, userId);
-      user.username = username; // Store as "name@justbecho"
+      user.username = username;
       
       console.log(`👤 Username generated for seller: ${user.username}`);
       
@@ -344,6 +334,19 @@ export const completeProfile = async (req, res) => {
     await user.save();
     console.log('✅ Profile completed successfully for user:', user.email);
 
+    // ✅ Generate new token with updated role
+    const newTokenPayload = {
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role // Include updated role
+    };
+
+    const newToken = jwt.sign(
+      newTokenPayload,
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
     const responseData = {
       id: user._id,
       email: user.email,
@@ -356,7 +359,7 @@ export const completeProfile = async (req, res) => {
       sellerVerified: user.sellerVerified,
       sellerVerificationStatus: user.sellerVerificationStatus,
       verificationId: user.verificationId,
-      username: user.username // Send as "name@justbecho"
+      username: user.username
     };
 
     if (role === 'seller') {
@@ -368,6 +371,7 @@ export const completeProfile = async (req, res) => {
       message: role === 'seller' 
         ? 'Profile completed! Verification sent to admin. Check Telegram for approval.' 
         : 'Profile completed successfully.',
+      token: newToken, // ✅ Send updated token
       user: responseData,
       redirectTo: '/dashboard'
     });
@@ -381,7 +385,7 @@ export const completeProfile = async (req, res) => {
   }
 };
 
-// ✅ NEW: Convert buyer to seller API
+// ✅ Convert buyer to seller API
 export const convertToSeller = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -396,7 +400,6 @@ export const convertToSeller = async (req, res) => {
       });
     }
     
-    // Check if already a seller
     if (user.role === 'seller') {
       return res.status(400).json({
         success: false,
@@ -404,7 +407,6 @@ export const convertToSeller = async (req, res) => {
       });
     }
     
-    // Check if profile is completed
     if (!user.profileCompleted) {
       return res.status(400).json({
         success: false,
@@ -412,7 +414,6 @@ export const convertToSeller = async (req, res) => {
       });
     }
     
-    // Check if required fields are present
     if (!user.name || !user.phone || !user.address) {
       return res.status(400).json({
         success: false,
@@ -420,30 +421,26 @@ export const convertToSeller = async (req, res) => {
       });
     }
     
-    // ✅ FIXED: Generate username "name@justbecho"
     const username = await generateSellerUsername(user.name, userId);
     
-    // Update user to seller
     user.role = 'seller';
-    user.username = username; // Store as "name@justbecho"
+    user.username = username;
     user.sellerVerified = false;
     user.sellerVerificationStatus = 'pending';
-    user.bankDetails = user.bankDetails || {}; // Initialize if not present
+    user.bankDetails = user.bankDetails || {};
     
-    // Generate verification ID for Telegram
     const verificationId = `SELLER-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     user.verificationId = verificationId;
     
     await user.save();
     
-    // Send Telegram notification
     const telegramResult = await sendSellerVerificationToAdmin(user);
     
     if (telegramResult && telegramResult.success) {
       console.log('📱 Telegram verification sent for converted seller');
     }
     
-    // Generate new token with updated role
+    // ✅ Generate new token with updated role
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
@@ -467,7 +464,7 @@ export const convertToSeller = async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name,
-        username: user.username, // Send as "name@justbecho"
+        username: user.username,
         role: user.role,
         profileCompleted: user.profileCompleted,
         sellerVerified: user.sellerVerified,
@@ -510,7 +507,6 @@ export const getMe = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Ensure username is in "name@justbecho" format
     const formattedUsername = ensureJustbechoFormat(user.username);
 
     res.json({
@@ -519,7 +515,7 @@ export const getMe = async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name || user.email.split('@')[0],
-        username: formattedUsername, // Send as "name@justbecho"
+        username: formattedUsername,
         profileCompleted: user.profileCompleted,
         role: user.role,
         instaId: user.instaId,
@@ -553,7 +549,6 @@ export const checkProfileStatus = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Ensure username is in "name@justbecho" format
     const formattedUsername = ensureJustbechoFormat(user.username);
 
     res.json({
@@ -564,7 +559,7 @@ export const checkProfileStatus = async (req, res) => {
       sellerVerified: user.sellerVerified,
       sellerVerificationStatus: user.sellerVerificationStatus,
       verificationId: user.verificationId,
-      username: formattedUsername, // Send as "name@justbecho"
+      username: formattedUsername,
       phone: user.phone,
       address: user.address,
       bankDetails: user.bankDetails
@@ -579,7 +574,6 @@ export const checkProfileStatus = async (req, res) => {
   }
 };
 
-// ✅ NEW: Update user profile
 export const updateProfile = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -595,7 +589,6 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    // Update fields if provided
     if (name) user.name = name;
     if (phone) {
       if (!/^\d{10}$/.test(phone)) {
@@ -624,17 +617,30 @@ export const updateProfile = async (req, res) => {
 
     await user.save();
 
-    // ✅ FIXED: Ensure username is in "name@justbecho" format
     const formattedUsername = ensureJustbechoFormat(user.username);
+
+    // ✅ Generate new token if role changed
+    const tokenPayload = {
+      userId: user._id.toString(),
+      email: user.email,
+      role: user.role
+    };
+
+    const newToken = jwt.sign(
+      tokenPayload,
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
 
     res.json({
       success: true,
       message: 'Profile updated successfully',
+      token: newToken,
       user: {
         id: user._id,
         email: user.email,
         name: user.name,
-        username: formattedUsername, // Send as "name@justbecho"
+        username: formattedUsername,
         phone: user.phone,
         address: user.address,
         role: user.role,
@@ -653,7 +659,6 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-// ✅ NEW: Update seller bank details
 export const updateBankDetails = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -720,7 +725,6 @@ export const updateBankDetails = async (req, res) => {
   }
 };
 
-// ✅ NEW: Get seller verification status
 export const getSellerStatus = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -740,7 +744,6 @@ export const getSellerStatus = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Ensure username is in "name@justbecho" format
     const formattedUsername = ensureJustbechoFormat(user.username);
 
     res.json({
@@ -748,7 +751,7 @@ export const getSellerStatus = async (req, res) => {
       sellerVerified: user.sellerVerified,
       sellerVerificationStatus: user.sellerVerificationStatus,
       verificationId: user.verificationId,
-      username: formattedUsername, // Send as "name@justbecho"
+      username: formattedUsername,
       role: user.role,
       name: user.name,
       email: user.email
