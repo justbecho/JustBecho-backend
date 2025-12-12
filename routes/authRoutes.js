@@ -17,15 +17,17 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// ✅ Production Configuration
+// ✅ Production Configuration - UPDATED
 const PRODUCTION_CONFIG = {
   clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
-  // ✅ UPDATED: Default frontend is justbecho.com
+  // ✅ CRITICAL FIX: Use correct callback URL format
+  backendUrl: 'https://just-becho-backend.vercel.app',
   frontendUrl: 'https://justbecho.com'
 };
 
 console.log('🚀 Google OAuth Configuration:');
 console.log('   Client ID:', PRODUCTION_CONFIG.clientId);
+console.log('   Backend URL:', PRODUCTION_CONFIG.backendUrl);
 console.log('   Frontend URL:', PRODUCTION_CONFIG.frontendUrl);
 
 // ✅ AUTH ROUTES
@@ -231,7 +233,8 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
 // ✅ GOOGLE OAUTH DEBUG ENDPOINT
 router.get('/google/debug', (req, res) => {
   const frontendUrl = req.query.frontend || PRODUCTION_CONFIG.frontendUrl;
-  const callbackUrl = `${frontendUrl}/api/auth/google/callback`;
+  // ✅ FIXED: Use backend URL for callback
+  const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
   
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${PRODUCTION_CONFIG.clientId}&` +
@@ -252,15 +255,15 @@ router.get('/google/debug', (req, res) => {
   });
 });
 
-// ✅ GOOGLE OAUTH INITIATE - UPDATED FOR justbecho.com
+// ✅ GOOGLE OAUTH INITIATE - FIXED REDIRECT URI MISMATCH
 router.get("/google", (req, res) => {
   console.log('🚀 Google OAuth initiated');
   
-  // ✅ Get frontend URL from query parameter or use default
+  // Get frontend URL from query parameter or use default
   const frontendUrl = req.query.frontend || PRODUCTION_CONFIG.frontendUrl;
   
-  // ✅ Dynamic callback URL
-  const callbackUrl = `${frontendUrl}/api/auth/google/callback`;
+  // ✅ CRITICAL FIX: Use BACKEND callback URL (must match Google Console)
+  const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
   
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${PRODUCTION_CONFIG.clientId}&` +
@@ -271,14 +274,15 @@ router.get("/google", (req, res) => {
     `prompt=consent&` +
     `state=${encodeURIComponent(frontendUrl)}`;
   
-  console.log('🌐 Redirecting to Google:', googleAuthUrl);
-  console.log('📞 Callback URL:', callbackUrl);
-  console.log('🏠 Frontend URL:', frontendUrl);
+  console.log('🌐 Google Auth Details:');
+  console.log('   Redirect URI sent to Google:', callbackUrl);
+  console.log('   Frontend URL (for later redirect):', frontendUrl);
+  console.log('   Full Google URL (first 100 chars):', googleAuthUrl.substring(0, 100) + '...');
   
   res.redirect(googleAuthUrl);
 });
 
-// ✅ GOOGLE CALLBACK - UPDATED FOR justbecho.com
+// ✅ GOOGLE CALLBACK - FIXED TOKEN EXCHANGE
 router.get("/google/callback", async (req, res) => {
   try {
     console.log('🔄 ===== GOOGLE CALLBACK STARTED =====');
@@ -290,7 +294,7 @@ router.get("/google/callback", async (req, res) => {
       console.error('❌ Google OAuth error:', error);
       console.error('Error description:', error_description);
       
-      // ✅ UPDATED: Redirect to frontend from state or default
+      // Redirect to frontend from state or default
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
       return res.redirect(`${frontendUrl}/login?error=google_${error}`);
     }
@@ -298,7 +302,6 @@ router.get("/google/callback", async (req, res) => {
     if (!code) {
       console.error('❌ No authorization code received');
       
-      // ✅ UPDATED: Redirect to frontend from state or default
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
       return res.redirect(`${frontendUrl}/login?error=no_auth_code`);
     }
@@ -311,17 +314,19 @@ router.get("/google/callback", async (req, res) => {
     if (!clientSecret) {
       console.error('❌ GOOGLE_CLIENT_SECRET not found in environment');
       
-      // ✅ UPDATED: Redirect to frontend
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
       return res.redirect(`${frontendUrl}/login?error=missing_config`);
     }
     
-    // ✅ Determine frontend URL from state or default
+    // ✅ FIXED: Determine frontend URL from state or default
     const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
-    const callbackUrl = `${frontendUrl}/api/auth/google/callback`;
     
-    console.log('🌐 Frontend URL:', frontendUrl);
-    console.log('📞 Callback URL:', callbackUrl);
+    // ✅ CRITICAL FIX: Use SAME callback URL as in the initial request
+    const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
+    
+    console.log('🌐 Callback Details:');
+    console.log('   Frontend URL:', frontendUrl);
+    console.log('   Callback URL (for token exchange):', callbackUrl);
     
     // Exchange code for tokens
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -333,7 +338,7 @@ router.get("/google/callback", async (req, res) => {
         code: code,
         client_id: PRODUCTION_CONFIG.clientId,
         client_secret: clientSecret,
-        redirect_uri: callbackUrl,
+        redirect_uri: callbackUrl, // ✅ Must match initial request
         grant_type: 'authorization_code'
       })
     });
@@ -343,6 +348,8 @@ router.get("/google/callback", async (req, res) => {
     
     if (tokenData.error) {
       console.error('❌ Token exchange failed:', tokenData.error);
+      console.error('Token error details:', tokenData.error_description);
+      console.error('Was expecting callback URL:', callbackUrl);
       return res.redirect(`${frontendUrl}/login?error=token_exchange`);
     }
     
@@ -429,7 +436,7 @@ router.get("/google/callback", async (req, res) => {
     console.error('❌ Google callback error:', error);
     console.error('Error stack:', error.stack);
     
-    // ✅ UPDATED: Error redirect to justbecho.com
+    // Error redirect to frontend
     res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=auth_failed`);
   }
 });
@@ -675,6 +682,19 @@ router.put("/verify-seller/:userId", authMiddleware, async (req, res) => {
 
 // ✅ GOOGLE OAUTH TEST PAGE
 router.get('/test-google', (req, res) => {
+  const frontendUrl = PRODUCTION_CONFIG.frontendUrl;
+  // ✅ FIXED: Use backend URL for callback
+  const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
+  
+  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${PRODUCTION_CONFIG.clientId}&` +
+    `redirect_uri=${encodeURIComponent(callbackUrl)}&` +
+    `response_type=code&` +
+    `scope=profile%20email&` +
+    `access_type=offline&` +
+    `prompt=consent&` +
+    `state=${encodeURIComponent(frontendUrl)}`;
+  
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -698,26 +718,33 @@ router.get('/test-google', (req, res) => {
         <h1>🔐 Google OAuth Test Page</h1>
         
         <div class="step">
-          <h2>Test 1: Direct Google URL for justbecho.com</h2>
-          <a href="https://accounts.google.com/o/oauth2/v2/auth?client_id=711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com&redirect_uri=https://justbecho.com/api/auth/google/callback&response_type=code&scope=profile%20email&access_type=offline&prompt=consent&state=https://justbecho.com">
-            <button>Test Direct Google Login (justbecho.com)</button>
+          <h2>Test 1: Direct Google URL (with correct callback)</h2>
+          <a href="${googleAuthUrl}">
+            <button>Test Google Login (FIXED)</button>
           </a>
-          <p>This opens Google sign-in page directly for justbecho.com</p>
+          <p>This uses the CORRECT callback URL that matches Google Console</p>
+          <div class="info">
+            <p><strong>Callback URL being sent:</strong></p>
+            <code>${callbackUrl}</code>
+            <p><strong>This MUST match what's in Google Console</strong></p>
+          </div>
         </div>
         
         <div class="step">
-          <h2>Test 2: Via Backend Route with frontend parameter</h2>
-          <a href="/api/auth/google?frontend=https://justbecho.com">
-            <button>Test via Backend Route (justbecho.com)</button>
+          <h2>Test 2: Via Backend Route</h2>
+          <a href="/api/auth/google">
+            <button>Test via Backend Route</button>
           </a>
-          <p>This uses the backend redirect route with frontend parameter</p>
+          <p>This uses the backend redirect route (same as frontend)</p>
         </div>
         
         <div class="step">
           <h2>Debug Information</h2>
           <div class="info">
-            <p><strong>Client ID:</strong> 711574038874...a9a8.apps.googleusercontent.com</p>
-            <p><strong>Default Frontend URL:</strong> ${PRODUCTION_CONFIG.frontendUrl}</p>
+            <p><strong>Client ID:</strong> ${PRODUCTION_CONFIG.clientId.substring(0, 30)}...</p>
+            <p><strong>Backend URL:</strong> ${PRODUCTION_CONFIG.backendUrl}</p>
+            <p><strong>Frontend URL:</strong> ${PRODUCTION_CONFIG.frontendUrl}</p>
+            <p><strong>Callback URL:</strong> ${callbackUrl}</p>
             <p><strong>Client Secret:</strong> ${process.env.GOOGLE_CLIENT_SECRET ? '✅ Set' : '❌ Missing'}</p>
             <p><strong>Environment:</strong> ${process.env.NODE_ENV || 'development'}</p>
           </div>
@@ -725,15 +752,21 @@ router.get('/test-google', (req, res) => {
         
         <div class="step">
           <h2>Test Links</h2>
-          <p><a href="/api/auth/google/debug?frontend=https://justbecho.com">Debug Info JSON</a></p>
+          <p><a href="/api/auth/google/debug">Debug Info JSON</a></p>
           <p><a href="/api/health">Health Check</a></p>
           <p><a href="/">API Home</a></p>
         </div>
         
         <div class="step success">
-          <h2>✅ If Successful</h2>
+          <h2>✅ Expected Flow After Fix</h2>
           <p>After Google login, you should be redirected to:</p>
-          <code>https://justbecho.com/?token=...&source=google</code>
+          <code>${PRODUCTION_CONFIG.frontendUrl}/?token=...&source=google</code>
+          <p><strong>If you still see redirect_uri_mismatch:</strong></p>
+          <ul>
+            <li>Check Google Console redirect URIs</li>
+            <li>Clear browser cache</li>
+            <li>Wait 5 minutes for Google settings to update</li>
+          </ul>
         </div>
       </div>
     </body>
