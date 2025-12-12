@@ -337,177 +337,119 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-// ✅ PERMANENT FIX: GET PRODUCTS BY CATEGORY - NO MIXING OF MEN'S/WOMEN'S FASHION
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+// ✅ SIMPLE & RELIABLE: GET PRODUCTS BY CATEGORY
 const getProductsByCategory = async (req, res) => {
   try {
-    const { category } = req.params;
-    const { page = 1, limit = 12, brand } = req.query;
+    let { category } = req.params;
+    const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
     
-    console.log('🔍 [PERMANENT FIX] Fetching products for category slug:', category);
+    console.log('🎯 [SIMPLE CATEGORY] Request:', {
+      categorySlug: category,
+      page,
+      limit,
+      brand,
+      sort
+    });
     
-    // ✅ STEP 1: Normalize the requested category slug
-    const requestedCategory = category.trim().toLowerCase();
+    // ✅ STEP 1: Decode URL if encoded
+    category = decodeURIComponent(category);
     
-    // ✅ STEP 2: Category mapping - URL slugs to Database category names
-    const categoryMapping = {
-      // Men's Fashion
-      'mens-fashion': "Men's Fashion",
-      'men-s-fashion': "Men's Fashion",
-      'mensfashion': "Men's Fashion",
-      'mens': "Men's Fashion",
+    // ✅ STEP 2: SIMPLE CATEGORY MAPPING
+    const categoryMap = {
+      // Men's
       'men': "Men's Fashion",
+      'mens': "Men's Fashion",
       'men-fashion': "Men's Fashion",
+      'mens-fashion': "Men's Fashion",
       
-      // Women's Fashion  
-      'womens-fashion': "Women's Fashion",
-      'women-s-fashion': "Women's Fashion",
-      'womensfashion': "Women's Fashion",
-      'womens': "Women's Fashion",
+      // Women's
       'women': "Women's Fashion",
+      'womens': "Women's Fashion",
       'women-fashion': "Women's Fashion",
+      'womens-fashion': "Women's Fashion",
       
-      // Other categories
+      // Others
       'footwear': "Footwear",
       'shoes': "Footwear",
       'sneakers': "Footwear",
       
       'accessories': "Accessories",
-      'fashion-accessories': "Accessories",
+      'accessory': "Accessories",
       
       'watches': "Watches",
-      'timepieces': "Watches",
+      'watch': "Watches",
       
       'perfumes': "Perfumes",
-      'fragrances': "Perfumes",
+      'perfume': "Perfumes",
       
-      'bags': "Bags",
-      'handbags': "Bags",
-      
-      'toys-collectibles': "TOYS & COLLECTIBLES",
       'toys': "TOYS & COLLECTIBLES",
-      'collectibles': "TOYS & COLLECTIBLES",
-      'toys-and-collectibles': "TOYS & COLLECTIBLES",
+      'toys-collectibles': "TOYS & COLLECTIBLES",
       
       'kids': "KIDS",
-      'children': "KIDS",
       'kids-fashion': "KIDS"
     };
     
-    // ✅ STEP 3: Get exact database category name
-    let dbCategoryName = categoryMapping[requestedCategory];
+    // ✅ STEP 3: Get database category name
+    let dbCategory = categoryMap[category.toLowerCase()];
     
-    // If not found in mapping, try to find exact match in database
-    if (!dbCategoryName) {
-      const allCategories = await Product.distinct('category');
-      const foundCategory = allCategories.find(cat => 
-        cat.toLowerCase().replace(/[^a-z]/g, '') === requestedCategory.replace(/[^a-z]/g, '')
-      );
-      
-      if (foundCategory) {
-        dbCategoryName = foundCategory;
-      } else {
-        // Fallback: Convert URL slug to proper format
-        dbCategoryName = requestedCategory
-          .split('-')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ');
-      }
+    // If not in map, use as-is (capitalized)
+    if (!dbCategory) {
+      dbCategory = category
+        .split('-')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
     }
     
-    console.log(`✅ [PERMANENT FIX] URL Slug: "${requestedCategory}" → Database Category: "${dbCategoryName}"`);
+    console.log(`🎯 [SIMPLE CATEGORY] Mapping: "${category}" → "${dbCategory}"`);
     
-    // ✅ STEP 4: Build query with EXACT CASE-INSENSITIVE MATCH
+    // ✅ STEP 4: SIMPLE QUERY
     let query = { 
       status: 'active',
-      category: { $regex: new RegExp(`^${dbCategoryName}$`, 'i') } // EXACT MATCH, case-insensitive
+      $or: [
+        { category: dbCategory },
+        { category: { $regex: new RegExp(dbCategory, 'i') } }
+      ]
     };
     
-    // ✅ STEP 5: For Men's/Women's Fashion, add additional safety
-    if (dbCategoryName.includes("Men") || dbCategoryName.includes("Men's")) {
-      console.log('🎯 [PERMANENT FIX] Applying Men\'s Fashion strict filter');
-      query = { 
-        status: 'active',
-        $or: [
-          { category: { $regex: /^Men'?s? Fashion$/i } },
-          { category: "Men's Fashion" },
-          { category: "Mens Fashion" },
-          { category: "Men Fashion" }
-        ]
-      };
-    } 
-    else if (dbCategoryName.includes("Women") || dbCategoryName.includes("Women's")) {
-      console.log('🎯 [PERMANENT FIX] Applying Women\'s Fashion strict filter');
-      query = { 
-        status: 'active',
-        $or: [
-          { category: { $regex: /^Women'?s? Fashion$/i } },
-          { category: "Women's Fashion" },
-          { category: "Womens Fashion" },
-          { category: "Women Fashion" }
-        ]
-      };
-    }
-    
-    // ✅ STEP 6: Added brand filter
+    // ✅ STEP 5: Add brand filter if provided
     if (brand && brand !== 'all') {
       query.brand = { $regex: new RegExp(brand, 'i') };
     }
-
+    
+    // ✅ STEP 6: Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === 'price-low') sortOption = { finalPrice: 1 };
+    if (sort === 'price-high') sortOption = { finalPrice: -1 };
+    if (sort === 'popular') sortOption = { views: -1, likes: -1 };
+    
+    // ✅ STEP 7: Pagination
     const skip = (page - 1) * limit;
-
+    
+    // ✅ STEP 8: Execute query
     const products = await Product.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortOption)
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
-
+      .select('productName brand category finalPrice images views likes createdAt condition sellerName');
+    
     const total = await Product.countDocuments(query);
     
-    // ✅ STEP 7: Verification logs
-    console.log(`✅ [PERMANENT FIX] Found ${products.length} products`);
+    // ✅ STEP 9: Get unique brands for this category
+    const brands = await Product.distinct('brand', query);
     
-    if (products.length > 0) {
-      const uniqueCategories = [...new Set(products.map(p => p.category))];
-      console.log(`✅ [PERMANENT FIX] Categories in results:`, uniqueCategories);
-      
-      // ✅ CRITICAL: Verify no mixed categories
-      if (uniqueCategories.length > 1) {
-        console.warn(`⚠️ [PERMANENT FIX] WARNING: Multiple categories found:`, uniqueCategories);
-        
-        // Filter to keep only the requested category
-        const filteredProducts = products.filter(p => 
-          p.category.toLowerCase().includes(requestedCategory.replace(/[^a-z]/g, '')) ||
-          requestedCategory.replace(/[^a-z]/g, '').includes(p.category.toLowerCase().replace(/[^a-z]/g, ''))
-        );
-        
-        if (filteredProducts.length !== products.length) {
-          console.log(`✅ [PERMANENT FIX] Filtered ${products.length - filteredProducts.length} mixed category products`);
-          return res.status(200).json({
-            success: true,
-            products: filteredProducts,
-            category: requestedCategory,
-            dbCategory: dbCategoryName,
-            warning: `Filtered ${products.length - filteredProducts.length} mixed category products`,
-            pagination: {
-              total: filteredProducts.length,
-              page: Number(page),
-              limit: Number(limit),
-              totalPages: Math.ceil(filteredProducts.length / limit)
-            }
-          });
-        }
-      }
-    }
+    console.log(`✅ [SIMPLE CATEGORY] Found ${products.length} products`);
     
-    console.log(`✅ [PERMANENT FIX] Final query:`, JSON.stringify(query, null, 2));
-
+    // ✅ STEP 10: Send response
     res.status(200).json({
       success: true,
+      message: `Found ${products.length} products in ${dbCategory}`,
+      category: dbCategory,
+      categorySlug: category,
       products,
-      category: requestedCategory,
-      dbCategory: dbCategoryName,
+      filters: {
+        brands: brands.filter(b => b).sort(),
+        conditions: ['Brand New With Tag', 'Brand New Without Tag', 'Like New', 'Fairly Used', 'Excellent', 'Good']
+      },
       pagination: {
         total,
         page: Number(page),
@@ -515,11 +457,13 @@ const getProductsByCategory = async (req, res) => {
         totalPages: Math.ceil(total / limit)
       }
     });
+    
   } catch (error) {
-    console.error('❌ [PERMANENT FIX] Get Products By Category Error:', error);
+    console.error('❌ [SIMPLE CATEGORY] Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: 'Server error: ' + error.message,
+      errorDetails: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -960,84 +904,6 @@ const testCloudinary = async (req, res) => {
   }
 };
 
-// ✅ DEBUG ENDPOINT: Get all categories with counts
-const getAllCategoriesDebug = async (req, res) => {
-  try {
-    const categories = await Product.aggregate([
-      { $match: { status: 'active' } },
-      { 
-        $group: {
-          _id: '$category',
-          count: { $sum: 1 },
-          sampleProducts: { 
-            $push: { 
-              id: '$_id',
-              name: '$productName',
-              brand: '$brand'
-            }
-          }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]);
-    
-    res.json({
-      success: true,
-      totalCategories: categories.length,
-      categories: categories.map(cat => ({
-        name: cat._id,
-        count: cat.count,
-        sampleProducts: cat.sampleProducts.slice(0, 3)
-      }))
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// ✅ DEBUG ENDPOINT: Check specific category matching
-const checkCategoryMatch = async (req, res) => {
-  try {
-    const { category } = req.params;
-    
-    const regexMatch = new RegExp(category, 'i');
-    const exactMatch = new RegExp(`^${category}$`, 'i');
-    
-    const regexProducts = await Product.find({ 
-      category: { $regex: regexMatch },
-      status: 'active'
-    }).select('productName brand category').limit(5);
-    
-    const exactProducts = await Product.find({ 
-      category: { $regex: exactMatch },
-      status: 'active'
-    }).select('productName brand category').limit(5);
-    
-    res.json({
-      success: true,
-      requestedCategory: category,
-      regexMatch: {
-        pattern: regexMatch.toString(),
-        count: regexProducts.length,
-        products: regexProducts
-      },
-      exactMatch: {
-        pattern: exactMatch.toString(),
-        count: exactProducts.length,
-        products: exactProducts
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
 // ✅ EXPORT ALL FUNCTIONS
 export {
   createProduct,
@@ -1046,12 +912,10 @@ export {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory, // ✅ THIS IS NOW PERMANENTLY FIXED
+  getProductsByCategory,
   getProductsByBrand,
   getAllBrands,
   getFeaturedProducts,
   searchProducts,
-  testCloudinary,
-  getAllCategoriesDebug,
-  checkCategoryMatch
+  testCloudinary
 };

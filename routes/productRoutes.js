@@ -6,36 +6,34 @@ import {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory,
+  getProductsByCategory, // ✅ Updated function
   getProductsByBrand,
   getAllBrands,
   getFeaturedProducts,
   searchProducts,
-  testCloudinary,
-  getAllCategoriesDebug,
-  checkCategoryMatch
+  testCloudinary
 } from "../controllers/productController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import uploadMiddleware from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-// ✅ DEBUG ENDPOINTS
-router.get("/debug/categories", getAllCategoriesDebug);
-router.get("/debug/category-match/:category", checkCategoryMatch);
+// ✅ TEST ENDPOINT
 router.get("/test/cloudinary", testCloudinary);
 
 // ✅ BRAND ROUTES
 router.get("/brands/all", getAllBrands);
 router.get("/brand/:brand", getProductsByBrand);
 
-// ✅ SPECIFIC ROUTES FIRST
+// ✅ CATEGORY ROUTE - MUST COME BEFORE GENERIC ROUTES
+router.get("/category/:category", getProductsByCategory); // ✅ PERMANENT FIX
+
+// ✅ OTHER ROUTES
 router.get("/my-products", authMiddleware, getUserProducts);
 router.get("/featured", getFeaturedProducts);
 router.get("/search", searchProducts);
-router.get("/category/:category", getProductsByCategory); // ✅ PERMANENT FIX APPLIED
 
-// ✅ PUBLIC ROUTES
+// ✅ PUBLIC ROUTES (Keep at bottom to avoid conflict)
 router.get("/", getAllProducts);
 router.get("/:id", getProduct);
 

@@ -1,531 +1,38 @@
-// controllers/productController.js - COMPLETE FIXED VERSION
+import Category from "../models/Category.js";
 import Product from "../models/Product.js";
-import User from "../models/User.js";
-import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ CREATE PRODUCT
-const createProduct = async (req, res) => {
-  console.log('=== 🚨 CREATE PRODUCT START ===');
-  
+// ✅ GET ALL CATEGORIES
+export const getAllCategories = async (req, res) => {
   try {
-    // ✅ SAFE: Access request data
-    const body = req.body || {};
-    const files = req.files || [];
-    const user = req.user || {};
+    const categories = await Category.find({ isActive: true });
     
-    console.log('📥 Request received:', {
-      hasBody: !!body,
-      hasFiles: files.length > 0,
-      hasUser: !!user.userId,
-      bodyKeys: Object.keys(body)
-    });
-
-    // ✅ Validate authentication
-    if (!user.userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Please login to list a product'
-      });
-    }
-
-    // ✅ Validate required fields
-    const requiredFields = [
-      'productName', 'brand', 'category', 'productType', 
-      'condition', 'description', 'askingPrice'
-    ];
-    
-    const missingFields = requiredFields.filter(field => !body[field]);
-    
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Missing required fields: ${missingFields.join(', ')}`
-      });
-    }
-
-    // ✅ Extract fields safely
-    const productName = String(body.productName || '').trim();
-    const brand = String(body.brand || '').trim();
-    const category = String(body.category || '').trim();
-    const productType = String(body.productType || '').trim();
-    const condition = String(body.condition || '').trim();
-    const description = String(body.description || '').trim();
-    const askingPrice = body.askingPrice || '0';
-    const purchaseYear = body.purchaseYear || '';
-
-    // ✅ Validate images
-    if (files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one product image is required'
-      });
-    }
-
-    console.log('✅ Validations passed');
-
-    // ✅ Calculate price
-    const price = parseFloat(askingPrice);
-    if (isNaN(price) || price <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid asking price'
-      });
-    }
-
-    // ✅ Platform fee calculation
-    let platformFeePercentage = 15;
-    if (price <= 2000) platformFeePercentage = 30;
-    else if (price <= 5000) platformFeePercentage = 28;
-    else if (price <= 10000) platformFeePercentage = 25;
-    else if (price <= 15000) platformFeePercentage = 20;
-
-    const feeAmount = (price * platformFeePercentage) / 100;
-    const finalPrice = Math.ceil(price + feeAmount);
-
-    console.log('💰 Price calculation:', { price, platformFeePercentage, finalPrice });
-
-    // ✅ UPLOAD IMAGES
-    console.log('🖼️ Starting image upload...');
-    const imageUrls = [];
-    const cloudinaryConfig = {
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET
-    };
-
-    const isCloudinaryConfigured = cloudinaryConfig.cloud_name && 
-                                   cloudinaryConfig.api_key && 
-                                   cloudinaryConfig.api_secret;
-
-    console.log('☁️ Cloudinary configured:', isCloudinaryConfigured);
-    
-    for (const [index, file] of files.entries()) {
-      try {
-        if (!file.buffer) {
-          console.log('⚠️ File has no buffer');
-          continue;
-        }
-
-        let imageUrl = '';
-        
-        if (isCloudinaryConfigured) {
-          // Upload to Cloudinary
-          const b64 = Buffer.from(file.buffer).toString('base64');
-          const dataURI = `data:${file.mimetype};base64,${b64}`;
-          
-          console.log(`📤 Uploading image ${index + 1}/${files.length} to Cloudinary...`);
-          
-          const result = await cloudinary.uploader.upload(dataURI, {
-            folder: 'justbecho/products',
-            resource_type: 'image'
-          });
-          
-          imageUrl = result.secure_url;
-          console.log(`✅ Cloudinary upload successful: ${file.originalname}`);
-        } else {
-          // Fallback to placeholder
-          const placeholders = [
-            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
-            'https://images.unsplash.com/photo-1565958011703-44f9829ba187',
-            'https://images.unsplash.com/photo-1482049016688-2d3e1b311543'
-          ];
-          imageUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
-          console.log(`⚠️ Cloudinary not configured. Using placeholder for: ${file.originalname}`);
-        }
-        
-        imageUrls.push({
-          url: imageUrl,
-          publicId: null,
-          isPrimary: imageUrls.length === 0
-        });
-        
-      } catch (uploadError) {
-        console.error(`❌ Image ${index + 1} upload failed:`, uploadError.message);
-        
-        // If Cloudinary error, use placeholder
-        const placeholders = [
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
-          'https://images.unsplash.com/photo-1565958011703-44f9829ba187'
-        ];
-        const fallbackUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
-        
-        imageUrls.push({
-          url: fallbackUrl,
-          publicId: null,
-          isPrimary: imageUrls.length === 0
-        });
-        
-        console.log(`✅ Using fallback image for ${file.originalname}`);
-      }
-    }
-
-    if (imageUrls.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Failed to process any images'
-      });
-    }
-
-    console.log(`✅ Processed ${imageUrls.length} images`);
-
-    // ✅ Get seller info
-    const seller = await User.findById(user.userId).select('name email username');
-    if (!seller) {
-      return res.status(404).json({
-        success: false,
-        message: 'Seller not found'
-      });
-    }
-
-    // ✅ Prepare product data
-    const productData = {
-      productName,
-      brand,
-      category,
-      productType,
-      condition,
-      description,
-      askingPrice: price,
-      platformFee: platformFeePercentage,
-      finalPrice,
-      images: imageUrls,
-      seller: user.userId,
-      sellerName: seller.name || seller.email.split('@')[0],
-      sellerUsername: seller.username || '',
-      status: 'active',
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
-    };
-
-    // ✅ Add optional fields
-    if (purchaseYear && !isNaN(parseInt(purchaseYear))) {
-      productData.purchaseYear = parseInt(purchaseYear);
-    }
-
-    // ✅ Create and save product
-    const product = new Product(productData);
-    const savedProduct = await product.save();
-    
-    console.log('✅ Product created:', savedProduct._id);
-    console.log('=== ✅ CREATE PRODUCT SUCCESS ===');
-
-    res.status(201).json({
-      success: true,
-      message: 'Product listed successfully!',
-      product: {
-        id: savedProduct._id,
-        productName: savedProduct.productName,
-        brand: savedProduct.brand,
-        finalPrice: savedProduct.finalPrice,
-        images: savedProduct.images.map(img => img.url),
-        sellerName: savedProduct.sellerName,
-        status: savedProduct.status
-      }
-    });
-
-  } catch (error) {
-    console.error('=== ❌ CREATE PRODUCT ERROR ===');
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
-    
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed: ' + messages.join(', ')
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Server error while creating product: ' + error.message
-    });
-  }
-};
-
-// ✅ GET USER PRODUCTS
-const getUserProducts = async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-    
-    const products = await Product.find({ seller: userId })
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      products: products.map(product => ({
-        id: product._id,
-        productName: product.productName,
-        brand: product.brand,
-        category: product.category,
-        finalPrice: product.finalPrice,
-        images: product.images.map(img => img.url),
-        status: product.status,
-        createdAt: product.createdAt,
-        views: product.views,
-        likes: product.likes
-      }))
-    });
-  } catch (error) {
-    console.error('Get User Products Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ GET ALL PRODUCTS
-const getAllProducts = async (req, res) => {
-  try {
-    const { 
-      page = 1, 
-      limit = 12, 
-      category, 
-      brand,
-      search 
-    } = req.query;
-    
-    let query = { status: 'active' };
-    
-    if (category && category !== 'all') {
-      query.category = { $regex: new RegExp(category, 'i') };
-    }
-    
-    if (brand && brand !== 'all') {
-      query.brand = { $regex: new RegExp(brand, 'i') };
-    }
-    
-    if (search) {
-      query.$or = [
-        { productName: { $regex: search, $options: 'i' } },
-        { brand: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const skip = (page - 1) * limit;
-
-    const products = await Product.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
-
-    const total = await Product.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      products,
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Get All Products Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-// ✅ FIXED: GET PRODUCTS BY CATEGORY - PROPER $in SYNTAX FIX
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-const getProductsByCategory = async (req, res) => {
-  try {
-    const { category } = req.params;
-    const { page = 1, limit = 12, brand } = req.query;
-    
-    console.log('🔍 [FIXED] Fetching products for category:', category);
-    
-    // ✅ START WITH BASE QUERY
-    let query = { 
-      status: 'active'
-    };
-    
-    // ✅ FIXED: PROPER $in SYNTAX FOR MEN'S/WOMEN'S FASHION
-    if (category.toLowerCase().includes('men') || 
-        category.toLowerCase().includes('mens') ||
-        category === 'men' || category === 'mens-fashion') {
-      
-      // ✅ CORRECT: Use $in on query.category field
-      query.category = {
-        $in: ["MEN'S FASHION", "Mens Fashion", "Men's Fashion", "Men Fashion", "MEN", "MENS FASHION"]
-      };
-      console.log('👔 [FIXED] Using Men\'s Fashion filter with proper $in syntax');
-      
-    } else if (category.toLowerCase().includes('women') || 
-               category.toLowerCase().includes('womens') ||
-               category === 'women' || category === 'womens-fashion') {
-      
-      // ✅ CORRECT: Use $in on query.category field
-      query.category = {
-        $in: ["WOMEN'S FASHION", "Womens Fashion", "Women's Fashion", "Women Fashion", "WOMEN", "WOMENS FASHION"]
-      };
-      console.log('👗 [FIXED] Using Women\'s Fashion filter with proper $in syntax');
-      
-    } else if (category.toLowerCase().includes('kids')) {
-      query.category = "KIDS";
-      
-    } else if (category.toLowerCase().includes('footwear')) {
-      query.category = "FOOTWEAR";
-      
-    } else if (category.toLowerCase().includes('watches')) {
-      query.category = "WATCHES";
-      
-    } else if (category.toLowerCase().includes('perfumes')) {
-      query.category = "PERFUMES";
-      
-    } else if (category.toLowerCase().includes('accessories')) {
-      query.category = "ACCESSORIES";
-      
-    } else if (category.toLowerCase().includes('toys') || 
-               category.toLowerCase().includes('collectibles')) {
-      query.category = "TOYS & COLLECTIBLES";
-      
-    } else if (category.toLowerCase().includes('influencer')) {
-      query.category = "INFLUENCER ONLY";
-      
-    } else {
-      // For any other category - exact match (case-insensitive)
-      query.category = { $regex: new RegExp(`^${category}$`, 'i') };
-    }
-    
-    // ✅ ADD BRAND FILTER IF PROVIDED
-    if (brand && brand !== 'all') {
-      query.brand = { $regex: new RegExp(brand, 'i') };
-    }
-
-    const skip = (page - 1) * limit;
-
-    const products = await Product.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
-
-    const total = await Product.countDocuments(query);
-    
-    console.log(`✅ [FIXED] Found ${products.length} products for ${category}`);
-    console.log(`✅ [FIXED] Query used:`, JSON.stringify(query, null, 2));
-
-    res.status(200).json({
-      success: true,
-      products,
-      category: category,
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('❌ Get Products By Category Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ GET PRODUCTS BY BRAND
-const getProductsByBrand = async (req, res) => {
-  try {
-    const { brand } = req.params;
-    const { category, page = 1, limit = 20 } = req.query;
-    
-    console.log('Fetching products for brand:', brand);
-    console.log('Category filter:', category);
-    
-    let query = { 
-      status: 'active',
-      brand: { $regex: new RegExp(brand, 'i') }
-    };
-    
-    // If category is provided, add it to filter
-    if (category && category !== 'all') {
-      query.category = { $regex: new RegExp(category, 'i') };
-    }
-    
-    console.log('Query:', query);
-
-    const skip = (page - 1) * limit;
-
-    const products = await Product.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
-
-    const total = await Product.countDocuments(query);
-    
-    console.log('Found products:', products.length);
-
-    res.status(200).json({
-      success: true,
-      brand,
-      category,
-      products,
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Get Products By Brand Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ GET ALL BRANDS
-const getAllBrands = async (req, res) => {
-  try {
-    const brands = await Product.distinct('brand', { status: 'active' });
-    
-    const brandsWithCount = await Promise.all(
-      brands.map(async (brand) => {
-        const count = await Product.countDocuments({ 
-          brand: { $regex: new RegExp(`^${brand}$`, 'i') },
+    // Get product counts for each category
+    const categoriesWithCounts = await Promise.all(
+      categories.map(async (category) => {
+        const productCount = await Product.countDocuments({
+          category: category.name,
           status: 'active'
         });
+        
         return {
-          name: brand,
-          count: count
+          _id: category._id,
+          name: category.name,
+          description: category.description,
+          image: category.image,
+          href: category.href,
+          productCount: productCount,
+          subCategories: category.subCategories || []
         };
       })
     );
     
-    // Sort alphabetically
-    const sortedBrands = brandsWithCount.sort((a, b) => 
-      a.name.toLowerCase().localeCompare(b.name.toLowerCase())
-    );
-    
-    // Filter out empty brands
-    const filteredBrands = sortedBrands.filter(b => b.name && b.name.trim() !== '');
-
     res.status(200).json({
       success: true,
-      brands: filteredBrands,
-      total: filteredBrands.length
+      categories: categoriesWithCounts,
+      count: categoriesWithCounts.length
     });
   } catch (error) {
-    console.error('Get All Brands Error:', error);
+    console.error('❌ Get All Categories Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -533,269 +40,254 @@ const getAllBrands = async (req, res) => {
   }
 };
 
-// ✅ GET SINGLE PRODUCT
-const getProduct = async (req, res) => {
+// ✅ GET CATEGORY BY SLUG
+export const getCategoryBySlug = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-
-    if (!product) {
+    const { slug } = req.params;
+    
+    console.log('🔍 [CATEGORY] Fetching category for slug:', slug);
+    
+    // Try different ways to find the category
+    const category = await Category.findOne({
+      $or: [
+        { href: { $regex: new RegExp(slug, 'i') } },
+        { name: { $regex: new RegExp(slug, 'i') } },
+        { slug: { $regex: new RegExp(slug, 'i') } }
+      ],
+      isActive: true
+    });
+    
+    if (!category) {
+      console.log('❌ [CATEGORY] Category not found for slug:', slug);
       return res.status(404).json({
         success: false,
-        message: 'Product not found'
+        message: 'Category not found'
       });
     }
+    
+    console.log('✅ [CATEGORY] Found category:', category.name);
+    
+    res.status(200).json({
+      success: true,
+      category: category
+    });
+  } catch (error) {
+    console.error('❌ Get Category By Slug Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
 
-    // Increment views
-    product.views += 1;
-    await product.save();
+// ✅ GET PRODUCTS BY CATEGORY SLUG
+export const getCategoryProducts = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
+    
+    console.log('🎯 [CATEGORY PRODUCTS] Request for slug:', slug);
+    console.log('Query params:', { page, limit, brand, sort });
+    
+    // Find category from database
+    const category = await Category.findOne({
+      $or: [
+        { href: { $regex: new RegExp(slug, 'i') } },
+        { name: { $regex: new RegExp(slug, 'i') } },
+        { slug: { $regex: new RegExp(slug, 'i') } }
+      ],
+      isActive: true
+    });
+    
+    if (!category) {
+      console.log('❌ [CATEGORY PRODUCTS] Category not found in DB for slug:', slug);
+      
+      // If category not found in DB, use direct mapping
+      const categoryMap = {
+        'men': "Men's Fashion",
+        'mens': "Men's Fashion",
+        'men-fashion': "Men's Fashion",
+        'mens-fashion': "Men's Fashion",
+        
+        'women': "Women's Fashion",
+        'womens': "Women's Fashion",
+        'women-fashion': "Women's Fashion",
+        'womens-fashion': "Women's Fashion",
+        
+        'footwear': "Footwear",
+        'shoes': "Footwear",
+        
+        'accessories': "Accessories",
+        
+        'watches': "Watches",
+        
+        'perfumes': "Perfumes",
+        
+        'toys': "TOYS & COLLECTIBLES",
+        'toys-collectibles': "TOYS & COLLECTIBLES",
+        
+        'kids': "KIDS"
+      };
+      
+      const dbCategory = categoryMap[slug] || slug.replace(/-/g, ' ');
+      console.log('🔄 [CATEGORY PRODUCTS] Using mapped category:', dbCategory);
+      
+      return await getProductsForCategory(dbCategory, req, res);
+    }
+    
+    console.log('✅ [CATEGORY PRODUCTS] Found category in DB:', category.name);
+    return await getProductsForCategory(category.name, req, res);
+    
+  } catch (error) {
+    console.error('❌ [CATEGORY PRODUCTS] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
 
-    // Get seller info
-    const seller = await User.findById(product.seller)
-      .select('name email username phone instaId sellerVerified');
-
-    const productWithSeller = {
-      ...product.toObject(),
-      seller: seller ? {
-        id: seller._id,
-        name: seller.name,
-        username: seller.username,
-        phone: seller.phone,
-        instaId: seller.instaId,
-        sellerVerified: seller.sellerVerified
-      } : null
+// ✅ HELPER FUNCTION: Get products for a category
+const getProductsForCategory = async (categoryName, req, res) => {
+  try {
+    const { page = 1, limit = 12, brand, minPrice, maxPrice, condition, sort = 'newest' } = req.query;
+    
+    console.log('🎯 [HELPER] Getting products for category:', categoryName);
+    
+    // Build query
+    let query = { 
+      status: 'active',
+      category: { $regex: new RegExp(categoryName, 'i') }
     };
-
-    res.status(200).json({
-      success: true,
-      product: productWithSeller
-    });
-  } catch (error) {
-    console.error('Get Product Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ UPDATE PRODUCT
-const updateProduct = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
     
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-
-    const user = req.user;
-    const isOwner = product.seller.toString() === user.userId;
-    const isAdmin = user.role === 'admin';
-
-    if (!isOwner && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this product'
-      });
-    }
-
-    const updateData = { ...req.body };
-    
-    // Handle image updates if files are provided
-    if (req.files && req.files.length > 0) {
-      const imageUrls = [];
-      
-      for (const file of req.files) {
-        try {
-          const cloudinaryConfig = {
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET
-          };
-
-          if (cloudinaryConfig.cloud_name && cloudinaryConfig.api_key && 
-              cloudinaryConfig.api_secret && file.buffer) {
-            const b64 = Buffer.from(file.buffer).toString('base64');
-            const dataURI = `data:${file.mimetype};base64,${b64}`;
-            
-            const result = await cloudinary.uploader.upload(dataURI, {
-              folder: 'justbecho/products'
-            });
-            
-            imageUrls.push({
-              url: result.secure_url,
-              publicId: result.public_id,
-              isPrimary: imageUrls.length === 0
-            });
-          }
-        } catch (uploadError) {
-          console.error('Image upload error:', uploadError);
-        }
-      }
-      
-      if (imageUrls.length > 0) {
-        updateData.images = imageUrls;
-      }
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'Product updated successfully',
-      product: updatedProduct
-    });
-  } catch (error) {
-    console.error('Update Product Error:', error);
-    
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(', ')
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ DELETE PRODUCT
-const deleteProduct = async (req, res) => {
-  try {
-    console.log('=== 🗑️ DELETE PRODUCT START ===');
-    console.log('📥 Product ID:', req.params.id);
-    console.log('👤 User object:', req.user);
-    
-    const product = await Product.findById(req.params.id);
-    
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-    
-    console.log('✅ Product found:', {
-      id: product._id,
-      name: product.productName,
-      seller: product.seller.toString()
-    });
-    
-    const user = req.user;
-    console.log('👤 Current user:', {
-      userId: user.userId,
-      email: user.email,
-      role: user.role
-    });
-    
-    // ✅ FIX: Check if user is admin OR owner
-    const isOwner = product.seller.toString() === user.userId;
-    const isAdmin = user.role === 'admin'; // ✅ Now this will work
-    
-    console.log('🔐 Authorization check:', {
-      isOwner,
-      isAdmin,
-      canDelete: isOwner || isAdmin
-    });
-    
-    if (!isOwner && !isAdmin) {
-      console.log('❌ Not authorized to delete');
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to delete this product'
-      });
-    }
-    
-    // ✅ ADMIN SPECIAL LOG
-    if (isAdmin) {
-      console.log('👑 ADMIN ACTION: Deleting product');
-    }
-    
-    await Product.findByIdAndDelete(req.params.id);
-    
-    res.status(200).json({
-      success: true,
-      message: isAdmin ? 'Product deleted by admin' : 'Product deleted successfully'
-    });
-    
-  } catch (error) {
-    console.error('❌ Delete Product Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ GET FEATURED PRODUCTS
-const getFeaturedProducts = async (req, res) => {
-  try {
-    const products = await Product.find({ 
-      status: 'active'
-    })
-      .sort({ views: -1, likes: -1 })
-      .limit(8)
-      .select('productName brand finalPrice images views likes condition');
-
-    res.status(200).json({
-      success: true,
-      products
-    });
-  } catch (error) {
-    console.error('Get Featured Products Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ SEARCH PRODUCTS
-const searchProducts = async (req, res) => {
-  try {
-    const { q, brand, category, limit = 20 } = req.query;
-    
-    let query = { status: 'active' };
-    
+    // Apply filters
     if (brand && brand !== 'all') {
       query.brand = { $regex: new RegExp(brand, 'i') };
     }
     
-    if (category && category !== 'all') {
-      query.category = { $regex: new RegExp(category, 'i') };
+    if (condition && condition !== 'all') {
+      query.condition = condition;
     }
     
-    if (q) {
-      query.$or = [
-        { productName: { $regex: q, $options: 'i' } },
-        { brand: { $regex: q, $options: 'i' } },
-        { description: { $regex: q, $options: 'i' } },
-        { category: { $regex: q, $options: 'i' } }
-      ];
+    if (minPrice) {
+      query.finalPrice = { $gte: Number(minPrice) };
     }
-
+    
+    if (maxPrice) {
+      query.finalPrice = { ...query.finalPrice, $lte: Number(maxPrice) };
+    }
+    
+    // Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === 'price-low') sortOption = { finalPrice: 1 };
+    if (sort === 'price-high') sortOption = { finalPrice: -1 };
+    if (sort === 'popular') sortOption = { views: -1, likes: -1 };
+    if (sort === 'oldest') sortOption = { createdAt: 1 };
+    
+    // Pagination
+    const skip = (page - 1) * limit;
+    
+    // Execute query
     const products = await Product.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortOption)
+      .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
-
+      .select('productName brand category finalPrice images views likes createdAt condition sellerName');
+    
+    const total = await Product.countDocuments(query);
+    
+    // Get unique brands
+    const brands = await Product.distinct('brand', query);
+    
+    // Get price range
+    const priceStats = await Product.aggregate([
+      {
+        $match: {
+          category: { $regex: new RegExp(categoryName, 'i') },
+          status: 'active',
+          finalPrice: { $exists: true }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          minPrice: { $min: '$finalPrice' },
+          maxPrice: { $max: '$finalPrice' }
+        }
+      }
+    ]);
+    
+    const priceRange = priceStats[0] || { minPrice: 0, maxPrice: 0 };
+    
+    console.log(`✅ [HELPER] Found ${products.length} products`);
+    
     res.status(200).json({
       success: true,
+      category: categoryName,
+      slug: req.params.slug,
       products,
-      count: products.length
+      filters: {
+        brands: brands.filter(b => b && b.trim() !== '').sort(),
+        conditions: ['Brand New With Tag', 'Brand New Without Tag', 'Like New', 'Fairly Used', 'Excellent', 'Good'],
+        priceRange: {
+          min: Math.floor(priceRange.minPrice),
+          max: Math.ceil(priceRange.maxPrice)
+        }
+      },
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: (page * limit) < total,
+        hasPrevPage: page > 1
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ [HELPER] Error:', error);
+    throw error;
+  }
+};
+
+// ✅ CREATE CATEGORY (Admin only)
+export const createCategory = async (req, res) => {
+  try {
+    const { name, description, image, href, subCategories, isActive } = req.body;
+
+    // Check if category already exists
+    const existingCategory = await Category.findOne({ 
+      $or: [
+        { name },
+        { href }
+      ]
+    });
+    
+    if (existingCategory) {
+      return res.status(400).json({
+        success: false,
+        message: 'Category already exists'
+      });
+    }
+
+    const category = new Category({
+      name,
+      description,
+      image,
+      href,
+      subCategories,
+      isActive
+    });
+
+    await category.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Category created successfully',
+      category: category
     });
   } catch (error) {
-    console.error('Search Products Error:', error);
+    console.error('❌ Create Category Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -803,83 +295,162 @@ const searchProducts = async (req, res) => {
   }
 };
 
-// ✅ TEST CLOUDINARY ENDPOINT
-const testCloudinary = async (req, res) => {
+// ✅ UPDATE CATEGORY (Admin only)
+export const updateCategory = async (req, res) => {
   try {
-    const cloudinaryConfig = {
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET
-    };
+    const { name, description, image, href, subCategories, isActive } = req.body;
 
-    const isConfigured = cloudinaryConfig.cloud_name && 
-                         cloudinaryConfig.api_key && 
-                         cloudinaryConfig.api_secret;
+    const category = await Category.findByIdAndUpdate(
+      req.params.categoryId,
+      {
+        name,
+        description,
+        image,
+        href,
+        subCategories,
+        isActive
+      },
+      { new: true, runValidators: true }
+    );
 
-    if (!isConfigured) {
-      return res.json({
+    if (!category) {
+      return res.status(404).json({
         success: false,
-        message: 'Cloudinary not configured',
-        env_variables: {
-          CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || 'not set',
-          CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? 'set (hidden)' : 'not set',
-          CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? 'set (hidden)' : 'not set'
-        }
+        message: 'Category not found'
       });
     }
 
-    // Test upload
-    const testImage = 'https://res.cloudinary.com/demo/image/upload/sample.jpg';
-    
-    try {
-      const result = await cloudinary.uploader.upload(testImage, {
-        folder: 'justbecho/test'
-      });
-
-      res.json({
-        success: true,
-        message: 'Cloudinary is working!',
-        test: {
-          uploaded: true,
-          url: result.secure_url,
-          public_id: result.public_id
-        },
-        config: {
-          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-          api_key_set: !!process.env.CLOUDINARY_API_KEY,
-          api_secret_set: !!process.env.CLOUDINARY_API_SECRET
-        }
-      });
-    } catch (uploadError) {
-      res.status(500).json({
-        success: false,
-        message: 'Cloudinary upload failed',
-        error: uploadError.message,
-        config: cloudinaryConfig
-      });
-    }
-
+    res.status(200).json({
+      success: true,
+      message: 'Category updated successfully',
+      category: category
+    });
   } catch (error) {
+    console.error('❌ Update Category Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Test failed',
-      error: error.message
+      message: 'Server error: ' + error.message
     });
   }
 };
 
-// ✅ EXPORT ALL FUNCTIONS
-export {
-  createProduct,
-  getUserProducts,
-  getProduct,
-  updateProduct,
-  deleteProduct,
-  getAllProducts,
-  getProductsByCategory, // ✅ THIS IS NOW FIXED
-  getProductsByBrand,
-  getAllBrands,
-  getFeaturedProducts,
-  searchProducts,
-  testCloudinary
+// ✅ DELETE CATEGORY (Admin only)
+export const deleteCategory = async (req, res) => {
+  try {
+    const category = await Category.findByIdAndDelete(req.params.categoryId);
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: 'Category not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Category deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Delete Category Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ GET CATEGORIES FOR NAVIGATION (Simplified)
+export const getCategoriesForNav = async (req, res) => {
+  try {
+    const categories = await Category.find({ isActive: true })
+      .select('name href image subCategories')
+      .sort({ name: 1 });
+    
+    res.status(200).json({
+      success: true,
+      categories
+    });
+  } catch (error) {
+    console.error('❌ Get Categories For Nav Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ SEARCH CATEGORIES
+export const searchCategories = async (req, res) => {
+  try {
+    const { q } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query is required'
+      });
+    }
+    
+    const categories = await Category.find({
+      isActive: true,
+      $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { description: { $regex: q, $options: 'i' } }
+      ]
+    });
+    
+    res.status(200).json({
+      success: true,
+      categories,
+      count: categories.length
+    });
+  } catch (error) {
+    console.error('❌ Search Categories Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
+};
+
+// ✅ GET CATEGORY STATS
+export const getCategoryStats = async (req, res) => {
+  try {
+    const categories = await Category.find({ isActive: true });
+    
+    const stats = await Promise.all(
+      categories.map(async (category) => {
+        const productCount = await Product.countDocuments({
+          category: category.name,
+          status: 'active'
+        });
+        
+        const recentProducts = await Product.countDocuments({
+          category: category.name,
+          status: 'active',
+          createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+        });
+        
+        return {
+          name: category.name,
+          href: category.href,
+          productCount,
+          recentProducts
+        };
+      })
+    );
+    
+    res.status(200).json({
+      success: true,
+      stats,
+      totalCategories: categories.length,
+      totalProducts: stats.reduce((sum, cat) => sum + cat.productCount, 0)
+    });
+  } catch (error) {
+    console.error('❌ Get Category Stats Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
 };
