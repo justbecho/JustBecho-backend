@@ -36,17 +36,9 @@ router.post("/login", login);
 router.get("/me", authMiddleware, getMe);
 router.post("/complete-profile", authMiddleware, completeProfile);
 router.get("/profile-status", authMiddleware, checkProfileStatus);
-
-// ✅ CONVERT BUYER TO SELLER
 router.put("/convert-to-seller", authMiddleware, convertToSeller);
-
-// ✅ UPDATE PROFILE
 router.put("/profile", authMiddleware, updateProfile);
-
-// ✅ UPDATE BANK DETAILS
 router.put("/bank-details", authMiddleware, updateBankDetails);
-
-// ✅ GET SELLER STATUS
 router.get("/seller-status", authMiddleware, getSellerStatus);
 
 // ✅ QUICK PROFILE CHECK
@@ -282,7 +274,7 @@ router.get("/google", (req, res) => {
   res.redirect(googleAuthUrl);
 });
 
-// ✅ GOOGLE CALLBACK - FIXED TOKEN EXCHANGE
+// ✅ UPDATED GOOGLE CALLBACK - WITH isNewUser FLAG
 router.get("/google/callback", async (req, res) => {
   try {
     console.log('🔄 ===== GOOGLE CALLBACK STARTED =====');
@@ -294,7 +286,6 @@ router.get("/google/callback", async (req, res) => {
       console.error('❌ Google OAuth error:', error);
       console.error('Error description:', error_description);
       
-      // Redirect to frontend from state or default
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
       return res.redirect(`${frontendUrl}/login?error=google_${error}`);
     }
@@ -373,6 +364,8 @@ router.get("/google/callback", async (req, res) => {
       ]
     });
     
+    let isNewUser = false;
+    
     if (!user) {
       // Create new user
       user = new User({
@@ -383,6 +376,7 @@ router.get("/google/callback", async (req, res) => {
         role: 'user'
       });
       await user.save();
+      isNewUser = true;
       console.log('✅ New user created in database');
     } else {
       // Update existing user
@@ -393,10 +387,14 @@ router.get("/google/callback", async (req, res) => {
       console.log('✅ Existing user found');
     }
     
-    // Generate JWT token
+    // Generate JWT token with isNewUser flag
     const tokenPayload = {
       userId: user._id.toString(),
-      email: user.email
+      email: user.email,
+      isNewUser: isNewUser, // ✅ CRITICAL: Add this flag
+      name: user.name,
+      role: user.role,
+      profileCompleted: user.profileCompleted
     };
     
     const jwtToken = jwt.sign(
@@ -405,19 +403,26 @@ router.get("/google/callback", async (req, res) => {
       { expiresIn: "7d" }
     );
     
-    console.log('✅ JWT token generated');
+    console.log('✅ JWT token generated, isNewUser:', isNewUser);
+    console.log('👤 User profileCompleted:', user.profileCompleted);
     
-    // Determine redirect destination
+    // ✅ CRITICAL FIX: Different redirect logic
     let redirectUrl = `${frontendUrl}/`;
     
-    if (!user.profileCompleted) {
-      redirectUrl = `${frontendUrl}/complete-profile`;
-      console.log('🔄 Redirecting to complete profile');
+    if (isNewUser) {
+      // New Google user - go to homepage with role selection trigger
+      redirectUrl = `${frontendUrl}/?token=${jwtToken}&newUser=true&source=google`;
+      console.log('👶 New Google user, will show role selection');
     } else {
-      console.log('🚀 Redirecting to home page');
+      // Existing user - check profile completion
+      if (!user.profileCompleted) {
+        redirectUrl = `${frontendUrl}/complete-profile?token=${jwtToken}&source=google`;
+        console.log('🔄 Existing user, profile not completed');
+      } else {
+        redirectUrl = `${frontendUrl}/?token=${jwtToken}&source=google`;
+        console.log('🚀 Existing user with completed profile, redirecting home');
+      }
     }
-    
-    redirectUrl += `?token=${jwtToken}`;
     
     // Add user info
     if (user.name) {
@@ -437,7 +442,7 @@ router.get("/google/callback", async (req, res) => {
     console.error('Error stack:', error.stack);
     
     // Error redirect to frontend
-    res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/login?error=auth_failed`);
+    res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/?error=auth_failed`);
   }
 });
 
