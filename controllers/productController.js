@@ -1,4 +1,3 @@
-// controllers/productController.js - COMPLETE FIXED VERSION
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
@@ -339,62 +338,119 @@ const getAllProducts = async (req, res) => {
 };
 
 // ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-// ✅ FIXED: GET PRODUCTS BY CATEGORY - WOMEN'S/MEN'S ISSUE SOLVED
+// ✅ PERMANENT FIX: GET PRODUCTS BY CATEGORY - NO MIXING OF MEN'S/WOMEN'S FASHION
 // ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
 const getProductsByCategory = async (req, res) => {
   try {
     const { category } = req.params;
     const { page = 1, limit = 12, brand } = req.query;
     
-    console.log('🔍 [FIXED] Fetching products for category:', category);
+    console.log('🔍 [PERMANENT FIX] Fetching products for category slug:', category);
     
-    // ✅ FIX: Use EXACT category matching, not regex partial matching
-    let categoryFilter;
+    // ✅ STEP 1: Normalize the requested category slug
+    const requestedCategory = category.trim().toLowerCase();
     
-    // Clean and normalize category name
-    const cleanCategory = category.trim();
-    
-    // Handle Men's/Women's Fashion specifically
-    if (cleanCategory.toLowerCase().includes("men") || 
-        cleanCategory.toLowerCase().includes("men's") ||
-        cleanCategory === "Mens Fashion") {
-      // For Men's Fashion - match ONLY men's products
-      categoryFilter = { 
-        $in: [
-          "Men's Fashion", 
-          "Mens Fashion", 
-          "Men Fashion",
-          "Men"
-        ] 
-      };
-      console.log('🔍 [FIXED] Using Men\'s Fashion filter');
+    // ✅ STEP 2: Category mapping - URL slugs to Database category names
+    const categoryMapping = {
+      // Men's Fashion
+      'mens-fashion': "Men's Fashion",
+      'men-s-fashion': "Men's Fashion",
+      'mensfashion': "Men's Fashion",
+      'mens': "Men's Fashion",
+      'men': "Men's Fashion",
+      'men-fashion': "Men's Fashion",
       
-    } else if (cleanCategory.toLowerCase().includes("women") || 
-               cleanCategory.toLowerCase().includes("women's") ||
-               cleanCategory === "Womens Fashion") {
-      // For Women's Fashion - match ONLY women's products
-      categoryFilter = { 
-        $in: [
-          "Women's Fashion", 
-          "Womens Fashion", 
-          "Women Fashion",
-          "Women"
-        ] 
-      };
-      console.log('🔍 [FIXED] Using Women\'s Fashion filter');
+      // Women's Fashion  
+      'womens-fashion': "Women's Fashion",
+      'women-s-fashion': "Women's Fashion",
+      'womensfashion': "Women's Fashion",
+      'womens': "Women's Fashion",
+      'women': "Women's Fashion",
+      'women-fashion': "Women's Fashion",
       
-    } else {
-      // For other categories - exact match (case-insensitive)
-      categoryFilter = { $regex: new RegExp(`^${cleanCategory}$`, 'i') };
-      console.log('🔍 [FIXED] Using exact match for:', cleanCategory);
-    }
-    
-    let query = { 
-      status: 'active',
-      category: categoryFilter  // ✅ USING THE FIXED FILTER
+      // Other categories
+      'footwear': "Footwear",
+      'shoes': "Footwear",
+      'sneakers': "Footwear",
+      
+      'accessories': "Accessories",
+      'fashion-accessories': "Accessories",
+      
+      'watches': "Watches",
+      'timepieces': "Watches",
+      
+      'perfumes': "Perfumes",
+      'fragrances': "Perfumes",
+      
+      'bags': "Bags",
+      'handbags': "Bags",
+      
+      'toys-collectibles': "TOYS & COLLECTIBLES",
+      'toys': "TOYS & COLLECTIBLES",
+      'collectibles': "TOYS & COLLECTIBLES",
+      'toys-and-collectibles': "TOYS & COLLECTIBLES",
+      
+      'kids': "KIDS",
+      'children': "KIDS",
+      'kids-fashion': "KIDS"
     };
     
-    // ✅ Added brand filter
+    // ✅ STEP 3: Get exact database category name
+    let dbCategoryName = categoryMapping[requestedCategory];
+    
+    // If not found in mapping, try to find exact match in database
+    if (!dbCategoryName) {
+      const allCategories = await Product.distinct('category');
+      const foundCategory = allCategories.find(cat => 
+        cat.toLowerCase().replace(/[^a-z]/g, '') === requestedCategory.replace(/[^a-z]/g, '')
+      );
+      
+      if (foundCategory) {
+        dbCategoryName = foundCategory;
+      } else {
+        // Fallback: Convert URL slug to proper format
+        dbCategoryName = requestedCategory
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+      }
+    }
+    
+    console.log(`✅ [PERMANENT FIX] URL Slug: "${requestedCategory}" → Database Category: "${dbCategoryName}"`);
+    
+    // ✅ STEP 4: Build query with EXACT CASE-INSENSITIVE MATCH
+    let query = { 
+      status: 'active',
+      category: { $regex: new RegExp(`^${dbCategoryName}$`, 'i') } // EXACT MATCH, case-insensitive
+    };
+    
+    // ✅ STEP 5: For Men's/Women's Fashion, add additional safety
+    if (dbCategoryName.includes("Men") || dbCategoryName.includes("Men's")) {
+      console.log('🎯 [PERMANENT FIX] Applying Men\'s Fashion strict filter');
+      query = { 
+        status: 'active',
+        $or: [
+          { category: { $regex: /^Men'?s? Fashion$/i } },
+          { category: "Men's Fashion" },
+          { category: "Mens Fashion" },
+          { category: "Men Fashion" }
+        ]
+      };
+    } 
+    else if (dbCategoryName.includes("Women") || dbCategoryName.includes("Women's")) {
+      console.log('🎯 [PERMANENT FIX] Applying Women\'s Fashion strict filter');
+      query = { 
+        status: 'active',
+        $or: [
+          { category: { $regex: /^Women'?s? Fashion$/i } },
+          { category: "Women's Fashion" },
+          { category: "Womens Fashion" },
+          { category: "Women Fashion" }
+        ]
+      };
+    }
+    
+    // ✅ STEP 6: Added brand filter
     if (brand && brand !== 'all') {
       query.brand = { $regex: new RegExp(brand, 'i') };
     }
@@ -409,13 +465,49 @@ const getProductsByCategory = async (req, res) => {
 
     const total = await Product.countDocuments(query);
     
-    console.log(`✅ [FIXED] Found ${products.length} products for ${category}`);
-    console.log(`✅ [FIXED] Query was: ${JSON.stringify(query)}`);
+    // ✅ STEP 7: Verification logs
+    console.log(`✅ [PERMANENT FIX] Found ${products.length} products`);
+    
+    if (products.length > 0) {
+      const uniqueCategories = [...new Set(products.map(p => p.category))];
+      console.log(`✅ [PERMANENT FIX] Categories in results:`, uniqueCategories);
+      
+      // ✅ CRITICAL: Verify no mixed categories
+      if (uniqueCategories.length > 1) {
+        console.warn(`⚠️ [PERMANENT FIX] WARNING: Multiple categories found:`, uniqueCategories);
+        
+        // Filter to keep only the requested category
+        const filteredProducts = products.filter(p => 
+          p.category.toLowerCase().includes(requestedCategory.replace(/[^a-z]/g, '')) ||
+          requestedCategory.replace(/[^a-z]/g, '').includes(p.category.toLowerCase().replace(/[^a-z]/g, ''))
+        );
+        
+        if (filteredProducts.length !== products.length) {
+          console.log(`✅ [PERMANENT FIX] Filtered ${products.length - filteredProducts.length} mixed category products`);
+          return res.status(200).json({
+            success: true,
+            products: filteredProducts,
+            category: requestedCategory,
+            dbCategory: dbCategoryName,
+            warning: `Filtered ${products.length - filteredProducts.length} mixed category products`,
+            pagination: {
+              total: filteredProducts.length,
+              page: Number(page),
+              limit: Number(limit),
+              totalPages: Math.ceil(filteredProducts.length / limit)
+            }
+          });
+        }
+      }
+    }
+    
+    console.log(`✅ [PERMANENT FIX] Final query:`, JSON.stringify(query, null, 2));
 
     res.status(200).json({
       success: true,
       products,
-      category,
+      category: requestedCategory,
+      dbCategory: dbCategoryName,
       pagination: {
         total,
         page: Number(page),
@@ -424,7 +516,7 @@ const getProductsByCategory = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Get Products By Category Error:', error);
+    console.error('❌ [PERMANENT FIX] Get Products By Category Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -443,12 +535,13 @@ const getProductsByBrand = async (req, res) => {
     
     let query = { 
       status: 'active',
-      brand: { $regex: new RegExp(brand, 'i') }
+      brand: { $regex: new RegExp(`^${brand}$`, 'i') } // Exact match for brand
     };
     
     // If category is provided, add it to filter
     if (category && category !== 'all') {
-      query.category = { $regex: new RegExp(category, 'i') };
+      // Use exact category matching to prevent mixing
+      query.category = { $regex: new RegExp(`^${category}$`, 'i') };
     }
     
     console.log('Query:', query);
@@ -602,6 +695,11 @@ const updateProduct = async (req, res) => {
       
       for (const file of req.files) {
         try {
+          if (!file.buffer) {
+            console.log('⚠️ File has no buffer');
+            continue;
+          }
+
           const cloudinaryConfig = {
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
             api_key: process.env.CLOUDINARY_API_KEY,
@@ -609,7 +707,7 @@ const updateProduct = async (req, res) => {
           };
 
           if (cloudinaryConfig.cloud_name && cloudinaryConfig.api_key && 
-              cloudinaryConfig.api_secret && file.buffer) {
+              cloudinaryConfig.api_secret) {
             const b64 = Buffer.from(file.buffer).toString('base64');
             const dataURI = `data:${file.mimetype};base64,${b64}`;
             
@@ -693,7 +791,7 @@ const deleteProduct = async (req, res) => {
     
     // ✅ FIX: Check if user is admin OR owner
     const isOwner = product.seller.toString() === user.userId;
-    const isAdmin = user.role === 'admin'; // ✅ Now this will work
+    const isAdmin = user.role === 'admin';
     
     console.log('🔐 Authorization check:', {
       isOwner,
@@ -765,7 +863,8 @@ const searchProducts = async (req, res) => {
     }
     
     if (category && category !== 'all') {
-      query.category = { $regex: new RegExp(category, 'i') };
+      // Use exact category matching
+      query.category = { $regex: new RegExp(`^${category}$`, 'i') };
     }
     
     if (q) {
@@ -861,6 +960,84 @@ const testCloudinary = async (req, res) => {
   }
 };
 
+// ✅ DEBUG ENDPOINT: Get all categories with counts
+const getAllCategoriesDebug = async (req, res) => {
+  try {
+    const categories = await Product.aggregate([
+      { $match: { status: 'active' } },
+      { 
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 },
+          sampleProducts: { 
+            $push: { 
+              id: '$_id',
+              name: '$productName',
+              brand: '$brand'
+            }
+          }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    res.json({
+      success: true,
+      totalCategories: categories.length,
+      categories: categories.map(cat => ({
+        name: cat._id,
+        count: cat.count,
+        sampleProducts: cat.sampleProducts.slice(0, 3)
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ✅ DEBUG ENDPOINT: Check specific category matching
+const checkCategoryMatch = async (req, res) => {
+  try {
+    const { category } = req.params;
+    
+    const regexMatch = new RegExp(category, 'i');
+    const exactMatch = new RegExp(`^${category}$`, 'i');
+    
+    const regexProducts = await Product.find({ 
+      category: { $regex: regexMatch },
+      status: 'active'
+    }).select('productName brand category').limit(5);
+    
+    const exactProducts = await Product.find({ 
+      category: { $regex: exactMatch },
+      status: 'active'
+    }).select('productName brand category').limit(5);
+    
+    res.json({
+      success: true,
+      requestedCategory: category,
+      regexMatch: {
+        pattern: regexMatch.toString(),
+        count: regexProducts.length,
+        products: regexProducts
+      },
+      exactMatch: {
+        pattern: exactMatch.toString(),
+        count: exactProducts.length,
+        products: exactProducts
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // ✅ EXPORT ALL FUNCTIONS
 export {
   createProduct,
@@ -869,10 +1046,12 @@ export {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory, // ✅ THIS IS NOW FIXED
+  getProductsByCategory, // ✅ THIS IS NOW PERMANENTLY FIXED
   getProductsByBrand,
   getAllBrands,
   getFeaturedProducts,
   searchProducts,
-  testCloudinary
+  testCloudinary,
+  getAllCategoriesDebug,
+  checkCategoryMatch
 };
