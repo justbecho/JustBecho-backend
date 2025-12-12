@@ -1,4 +1,4 @@
-// server.js - UPDATED VERSION WITH ADMIN
+// server.js - UPDATED VERSION WITH PROPER CORS
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -48,7 +48,7 @@ import wishlistRoutes from "./routes/Wishlist.js";
 import cartRoutes from "./routes/cartRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
-import adminRoutes from "./routes/adminRoutes.js"; // ✅ ADDED: Admin routes
+import adminRoutes from "./routes/adminRoutes.js";
 
 // Connect to database
 connectDB();
@@ -59,26 +59,98 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ✅ CORS Configuration
+// ✅ ✅ ✅ CRITICAL CORS FIX - Add this BEFORE any routes
+// Handle preflight requests
+app.options('*', cors());
+
+// ✅ UPDATED CORS Configuration - MORE FLEXIBLE
 const allowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:3001',
   'https://just-becho-frontend.vercel.app',
   'https://justbecho.vercel.app',
   'https://justbecho-frontend.vercel.app',
   'https://just-becho.vercel.app',
   'https://justbecho.com',
-  'https://www.justbecho.com'
+  'https://www.justbecho.com',
+  'https://justbecho.vercel.app',
+  'https://justbecho-frontend.vercel.app'
 ];
 
-console.log('🌐 CORS Allowed Origins:', allowedOrigins.length);
+console.log('🌐 CORS Allowed Origins:', allowedOrigins);
 
+// ✅ FIXED CORS middleware
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('🌐 No origin - allowing');
+      return callback(null, true);
+    }
+    
+    // ✅ Allow all justbecho domains
+    if (origin.includes('justbecho')) {
+      console.log('✅ Allowing justbecho domain:', origin);
+      return callback(null, true);
+    }
+    
+    // ✅ Allow local development
+    if (origin.includes('localhost')) {
+      console.log('✅ Allowing localhost:', origin);
+      return callback(null, true);
+    }
+    
+    // ✅ Check exact match
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ Exact match found:', origin);
+      return callback(null, true);
+    }
+    
+    console.log('❌ CORS Blocked origin:', origin);
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  exposedHeaders: ['Content-Length']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Accept', 
+    'Origin', 
+    'X-Requested-With',
+    'X-Auth-Token',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Headers',
+    'Access-Control-Request-Method'
+  ],
+  exposedHeaders: [
+    'Content-Length', 
+    'Content-Type',
+    'Authorization',
+    'Access-Control-Allow-Origin'
+  ],
+  maxAge: 86400, // 24 hours
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// ✅ Add CORS headers manually as fallback
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  if (origin && (origin.includes('justbecho') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  }
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
 
 // ✅ Body parsing middleware
 app.use(express.json({ limit: '50mb' }));
@@ -88,6 +160,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use((req, res, next) => {
   const startTime = Date.now();
   console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log(`📍 Origin: ${req.headers.origin || 'No origin'}`);
+  console.log(`📍 Headers:`, req.headers);
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
@@ -110,14 +184,37 @@ app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/cart", cartRoutes);
-app.use("/api/admin", adminRoutes); // ✅ ADDED: Admin routes
+app.use("/api/admin", adminRoutes);
 
-// ✅ Health check endpoint
+// ✅ Test CORS endpoint
+app.get("/api/test-cors", (req, res) => {
+  console.log('🔧 Test CORS endpoint hit');
+  console.log('🔧 Origin:', req.headers.origin);
+  console.log('🔧 Headers:', req.headers);
+  
+  res.json({
+    success: true,
+    message: 'CORS test successful',
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString(),
+    corsHeaders: {
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
+});
+
+// ✅ Health check endpoint with CORS
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    cors: {
+      allowedOrigins: allowedOrigins,
+      currentOrigin: req.headers.origin || 'none'
+    },
     services: {
       database: 'connected',
       googleOAuth: 'configured',
@@ -125,7 +222,7 @@ app.get("/api/health", (req, res) => {
         configured: !!process.env.CLOUDINARY_CLOUD_NAME,
         cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'not set'
       },
-      admin: 'available' // ✅ Added admin status
+      admin: 'available'
     }
   });
 });
@@ -135,7 +232,11 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.3.0", // ✅ Updated version
+    version: "2.4.0", // ✅ Updated version
+    cors: {
+      enabled: true,
+      allowedOrigins: allowedOrigins.length
+    },
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -143,17 +244,9 @@ app.get("/", (req, res) => {
       users: "/api/users",
       categories: "/api/categories",
       cart: "/api/cart",
-      admin: "/api/admin", // ✅ Added admin endpoints
-      health: "/api/health"
-    },
-    services: {
-      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? 'active' : 'inactive',
-      adminPanel: 'active' // ✅ Added admin panel status
-    },
-    admin: { // ✅ Added admin info
-      email: "admin@justbecho.com",
-      password: "Admin@12345",
-      note: "Permanent admin account with full control"
+      admin: "/api/admin",
+      health: "/api/health",
+      testCors: "/api/test-cors" // ✅ Added test endpoint
     }
   });
 });
@@ -172,6 +265,13 @@ app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
   console.error('Stack:', error.stack);
   
+  // Add CORS headers to error responses
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('justbecho') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+  
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error',
@@ -179,7 +279,7 @@ app.use((error, req, res, next) => {
   });
 });
 
-// ✅ UPDATED: Auto-create admin user with proper role
+// ✅ Auto-create admin user
 const createAdminUser = async () => {
   try {
     console.log('🛠️ Checking/creating admin user...');
@@ -190,7 +290,6 @@ const createAdminUser = async () => {
     const existingAdmin = await User.findOne({ email: 'admin@justbecho.com' });
     
     if (!existingAdmin) {
-      // Create new admin
       const hashedPassword = await bcrypt.default.hash('Admin@12345', 10);
       
       const adminUser = new User({
@@ -198,7 +297,7 @@ const createAdminUser = async () => {
         password: hashedPassword,
         name: 'Super Admin',
         phone: '9999999999',
-        role: 'admin', // ✅ Set as 'admin' not 'user'
+        role: 'admin',
         profileCompleted: true,
         sellerVerified: true,
         username: 'superadmin@justbecho',
@@ -214,7 +313,6 @@ const createAdminUser = async () => {
       console.log('🎯 Auto-created SUPER ADMIN user with role: admin');
       
     } else if (existingAdmin.role !== 'admin') {
-      // Update existing user to admin
       console.log('🔄 Updating existing user to admin role...');
       existingAdmin.role = 'admin';
       existingAdmin.name = 'Super Admin';
@@ -222,7 +320,6 @@ const createAdminUser = async () => {
       existingAdmin.profileCompleted = true;
       existingAdmin.sellerVerified = true;
       
-      // Update password if it's the old one
       const isOldPassword = await bcrypt.default.compare('admin123', existingAdmin.password);
       if (isOldPassword) {
         existingAdmin.password = await bcrypt.default.hash('Admin@12345', 10);
@@ -236,7 +333,6 @@ const createAdminUser = async () => {
       console.log('🎯 Admin user already exists with correct role');
     }
     
-    // Verify admin exists
     const verifiedAdmin = await User.findOne({ email: 'admin@justbecho.com' });
     console.log('👑 Admin Status:', {
       email: verifiedAdmin.email,
@@ -255,8 +351,8 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.3.0                  ║
-║                    👑 WITH ADMIN PANEL                       ║
+║                  🚀 JUST BECHO SERVER 2.4.0                  ║
+║                    🔧 WITH CORS FIX                          ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
@@ -265,16 +361,15 @@ app.listen(PORT, () => {
   ✅ API URL: http://localhost:${PORT}
   ✅ Database: Connected ✅
 
-👑 ADMIN ACCESS:
-  ✅ Email: admin@justbecho.com
-  ✅ Password: Admin@12345
-  ✅ Role: admin (Full control)
-
-☁️ CLOUDINARY STATUS:
-  ${process.env.CLOUDINARY_CLOUD_NAME ? '✅ Configured' : '❌ Not Configured'}
-
 🌐 CORS CONFIGURATION:
   ✅ ${allowedOrigins.length} allowed origins
+  ✅ Preflight requests handled
+  ✅ Dynamic origin matching
+  ✅ JustBecho domains allowed
+
+🔧 TEST ENDPOINTS:
+  ✅ /api/test-cors - CORS test
+  ✅ /api/health - Health check
 
 📡 AVAILABLE API ENDPOINTS:
   🔐 Auth:        http://localhost:${PORT}/api/auth
@@ -284,15 +379,6 @@ app.listen(PORT, () => {
   📁 Categories:  http://localhost:${PORT}/api/categories
   🛒  Cart:        http://localhost:${PORT}/api/cart
   👑 Admin:       http://localhost:${PORT}/api/admin
-  ❤️  Health:      http://localhost:${PORT}/api/health
-
-👑 ADMIN PRIVILEGES:
-  ✅ Delete any product
-  ✅ Delete any user  
-  ✅ Change user roles
-  ✅ Verify sellers
-  ✅ View all statistics
-  ✅ Full system control
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.
