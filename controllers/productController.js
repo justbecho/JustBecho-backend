@@ -2,32 +2,32 @@ import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ STRICT CATEGORY MAPPING - FIXED VERSION
+// ✅ STRICT CATEGORY MAPPING
 const strictCategoryMapping = (category) => {
   const map = {
-    // Men's - All variations to EXACT database name
-    "Men's Fashion": "Men's Fashion",
-    "Mens Fashion": "Men's Fashion",
-    "Mens": "Men's Fashion",
-    "Men": "Men's Fashion",
-    "men": "Men's Fashion",
-    "mens": "Men's Fashion",
-    "men-fashion": "Men's Fashion",
-    "men's": "Men's Fashion",
-    "men's-fashion": "Men's Fashion",
+    // Men's
+    "Men's Fashion": "Men",
+    "Mens Fashion": "Men", 
+    "Mens": "Men",
+    "Men": "Men",
+    "men": "Men",
+    "mens": "Men",
+    "men-fashion": "Men",
+    "men's": "Men",
+    "men's-fashion": "Men",
     
-    // Women's - All variations to EXACT database name
-    "Women's Fashion": "Women's Fashion",
-    "Womens Fashion": "Women's Fashion",
-    "Womens": "Women's Fashion",
-    "Women": "Women's Fashion",
-    "women": "Women's Fashion",
-    "womens": "Women's Fashion",
-    "women-fashion": "Women's Fashion",
-    "women's": "Women's Fashion",
-    "women's-fashion": "Women's Fashion",
+    // Women's
+    "Women's Fashion": "Women",
+    "Womens Fashion": "Women",
+    "Womens": "Women",
+    "Women": "Women",
+    "women": "Women",
+    "womens": "Women",
+    "women-fashion": "Women",
+    "women's": "Women",
+    "women's-fashion": "Women",
     
-    // Others - EXACT names as stored in database
+    // Others
     "Footwear": "Footwear",
     "footwear": "Footwear",
     "Shoes": "Footwear",
@@ -42,22 +42,22 @@ const strictCategoryMapping = (category) => {
     "Perfumes": "Perfumes",
     "perfumes": "Perfumes",
     
-    "TOYS & COLLECTIBLES": "TOYS & COLLECTIBLES",
-    "Toys & Collectibles": "TOYS & COLLECTIBLES",
-    "Toys": "TOYS & COLLECTIBLES",
-    "toys": "TOYS & COLLECTIBLES",
+    "TOYS & COLLECTIBLES": "Toys",
+    "Toys & Collectibles": "Toys",
+    "Toys": "Toys",
+    "toys": "Toys",
     
-    "KIDS": "KIDS",
-    "Kids": "KIDS",
-    "kids": "KIDS"
+    "KIDS": "Kids",
+    "Kids": "Kids",
+    "kids": "Kids"
   };
   
-  // First check exact match
+  // Check exact match
   if (map[category]) {
     return map[category];
   }
   
-  // Check case-insensitive match
+  // Check case-insensitive
   const lowerCategory = category.toLowerCase();
   for (const key in map) {
     if (key.toLowerCase() === lowerCategory) {
@@ -65,25 +65,17 @@ const strictCategoryMapping = (category) => {
     }
   }
   
-  // If no match found, return original
   return category;
 };
 
-// ✅ CREATE PRODUCT - WITH CATEGORY FIX
+// ✅ CREATE PRODUCT
 const createProduct = async (req, res) => {
-  console.log('=== 🚨 CREATE PRODUCT START ===');
+  console.log('=== CREATE PRODUCT START ===');
   
   try {
     const body = req.body || {};
     const files = req.files || [];
     const user = req.user || {};
-    
-    console.log('📥 Request received:', {
-      hasBody: !!body,
-      hasFiles: files.length > 0,
-      hasUser: !!user.userId,
-      bodyKeys: Object.keys(body)
-    });
 
     if (!user.userId) {
       return res.status(401).json({
@@ -122,11 +114,9 @@ const createProduct = async (req, res) => {
       });
     }
 
-    console.log('✅ Validations passed');
-
-    // ✅ APPLY STRICT CATEGORY MAPPING
+    // ✅ APPLY CATEGORY MAPPING
     const standardizedCategory = strictCategoryMapping(category);
-    console.log(`🗺️ Category mapping: "${category}" → "${standardizedCategory}"`);
+    console.log(`Category mapping: "${category}" → "${standardizedCategory}"`);
 
     const price = parseFloat(askingPrice);
     if (isNaN(price) || price <= 0) {
@@ -145,10 +135,7 @@ const createProduct = async (req, res) => {
     const feeAmount = (price * platformFeePercentage) / 100;
     const finalPrice = Math.ceil(price + feeAmount);
 
-    console.log('💰 Price calculation:', { price, platformFeePercentage, finalPrice });
-
     // ✅ UPLOAD IMAGES
-    console.log('🖼️ Starting image upload...');
     const imageUrls = [];
     const cloudinaryConfig = {
       cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -160,14 +147,9 @@ const createProduct = async (req, res) => {
                                    cloudinaryConfig.api_key && 
                                    cloudinaryConfig.api_secret;
 
-    console.log('☁️ Cloudinary configured:', isCloudinaryConfigured);
-    
     for (const [index, file] of files.entries()) {
       try {
-        if (!file.buffer) {
-          console.log('⚠️ File has no buffer');
-          continue;
-        }
+        if (!file.buffer) continue;
 
         let imageUrl = '';
         
@@ -175,15 +157,12 @@ const createProduct = async (req, res) => {
           const b64 = Buffer.from(file.buffer).toString('base64');
           const dataURI = `data:${file.mimetype};base64,${b64}`;
           
-          console.log(`📤 Uploading image ${index + 1}/${files.length} to Cloudinary...`);
-          
           const result = await cloudinary.uploader.upload(dataURI, {
             folder: 'justbecho/products',
             resource_type: 'image'
           });
           
           imageUrl = result.secure_url;
-          console.log(`✅ Cloudinary upload successful: ${file.originalname}`);
         } else {
           const placeholders = [
             'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
@@ -191,7 +170,6 @@ const createProduct = async (req, res) => {
             'https://images.unsplash.com/photo-1482049016688-2d3e1b311543'
           ];
           imageUrl = placeholders[Math.floor(Math.random() * placeholders.length)];
-          console.log(`⚠️ Cloudinary not configured. Using placeholder for: ${file.originalname}`);
         }
         
         imageUrls.push({
@@ -201,7 +179,7 @@ const createProduct = async (req, res) => {
         });
         
       } catch (uploadError) {
-        console.error(`❌ Image ${index + 1} upload failed:`, uploadError.message);
+        console.error(`Image upload failed:`, uploadError.message);
         
         const placeholders = [
           'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
@@ -214,8 +192,6 @@ const createProduct = async (req, res) => {
           publicId: null,
           isPrimary: imageUrls.length === 0
         });
-        
-        console.log(`✅ Using fallback image for ${file.originalname}`);
       }
     }
 
@@ -226,8 +202,6 @@ const createProduct = async (req, res) => {
       });
     }
 
-    console.log(`✅ Processed ${imageUrls.length} images`);
-
     const seller = await User.findById(user.userId).select('name email username');
     if (!seller) {
       return res.status(404).json({
@@ -236,11 +210,11 @@ const createProduct = async (req, res) => {
       });
     }
 
-    // ✅ PREPARE PRODUCT DATA WITH STANDARDIZED CATEGORY
+    // ✅ PRODUCT DATA
     const productData = {
       productName,
       brand,
-      category: standardizedCategory, // ✅ STANDARDIZED CATEGORY
+      category: standardizedCategory,
       productType,
       condition,
       description,
@@ -265,11 +239,8 @@ const createProduct = async (req, res) => {
     console.log('✅ Product created:', {
       id: savedProduct._id,
       name: savedProduct.productName,
-      brand: savedProduct.brand,
-      category: savedProduct.category,
-      price: savedProduct.finalPrice
+      category: savedProduct.category
     });
-    console.log('=== ✅ CREATE PRODUCT SUCCESS ===');
 
     res.status(201).json({
       success: true,
@@ -278,7 +249,7 @@ const createProduct = async (req, res) => {
         id: savedProduct._id,
         productName: savedProduct.productName,
         brand: savedProduct.brand,
-        category: savedProduct.category, // ✅ Send back the stored category
+        category: savedProduct.category,
         finalPrice: savedProduct.finalPrice,
         images: savedProduct.images.map(img => img.url),
         sellerName: savedProduct.sellerName,
@@ -287,9 +258,7 @@ const createProduct = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('=== ❌ CREATE PRODUCT ERROR ===');
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
+    console.error('CREATE PRODUCT ERROR:', error);
     
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
@@ -317,12 +286,8 @@ const getUserProducts = async (req, res) => {
       });
     }
     
-    console.log('📦 Fetching products for user:', userId);
-    
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 });
-
-    console.log(`✅ Found ${products.length} products for user ${userId}`);
 
     res.status(200).json({
       success: true,
@@ -363,7 +328,6 @@ const getAllProducts = async (req, res) => {
     let query = { status: 'active' };
     
     if (category && category !== 'all') {
-      // ✅ Use strict category mapping for query
       const standardizedCategory = strictCategoryMapping(category);
       query.category = standardizedCategory;
     }
@@ -409,53 +373,42 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ FIXED: GET PRODUCTS BY CATEGORY (EXACT MATCHING)
+// ✅ GET PRODUCTS BY CATEGORY - SIMPLE & WORKING
 const getProductsByCategory = async (req, res) => {
   try {
     let { category } = req.params;
     const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
     
-    console.log('🎯 [PRODUCT CATEGORY] Request for category:', category);
-    console.log('Query params:', { page, limit, brand, sort });
+    console.log('🎯 Getting products for category:', category);
     
-    // ✅ STEP 1: Decode URL and standardize
+    // Decode URL
     category = decodeURIComponent(category);
     
-    // ✅ STEP 2: Apply strict category mapping
-    const dbCategory = strictCategoryMapping(category);
-    console.log(`🗺️ Strict category mapping: "${category}" → "${dbCategory}"`);
+    // Apply category mapping
+    const mappedCategory = strictCategoryMapping(category);
+    console.log(`Mapped category: "${category}" → "${mappedCategory}"`);
     
-    // ✅ STEP 3: EXACT QUERY - Use exact match instead of regex
+    // SIMPLE QUERY - just use regex for matching
     let query = { 
-      status: 'active'
+      status: 'active',
+      category: { $regex: new RegExp(mappedCategory, 'i') }
     };
     
-    // Handle special cases for Men's and Women's Fashion
-    if (dbCategory === "Men's Fashion" || dbCategory === "Mens Fashion") {
-      query.category = "Men's Fashion";
-    } else if (dbCategory === "Women's Fashion" || dbCategory === "Womens Fashion") {
-      query.category = "Women's Fashion";
-    } else {
-      // For other categories, use exact case-insensitive match
-      query.category = { $regex: new RegExp(`^${dbCategory}$`, 'i') };
-    }
-    
-    // ✅ STEP 4: Add brand filter if provided
+    // Add brand filter
     if (brand && brand !== 'all') {
       query.brand = { $regex: new RegExp(brand, 'i') };
     }
     
-    // ✅ STEP 5: Sorting
+    // Sorting
     let sortOption = { createdAt: -1 };
     if (sort === 'price-low') sortOption = { finalPrice: 1 };
     if (sort === 'price-high') sortOption = { finalPrice: -1 };
     if (sort === 'popular') sortOption = { views: -1, likes: -1 };
-    if (sort === 'oldest') sortOption = { createdAt: 1 };
     
-    // ✅ STEP 6: Pagination
+    // Pagination
     const skip = (page - 1) * limit;
     
-    // ✅ STEP 7: Execute query
+    // Execute query
     const products = await Product.find(query)
       .sort(sortOption)
       .skip(skip)
@@ -464,34 +417,28 @@ const getProductsByCategory = async (req, res) => {
     
     const total = await Product.countDocuments(query);
     
-    // ✅ STEP 8: Get unique brands for this EXACT category
-    const brands = await Product.distinct('brand', query);
+    // Get unique brands
+    const brandsList = await Product.distinct('brand', query);
     
-    console.log(`✅ [PRODUCT CATEGORY] Found ${products.length} products with EXACT category: "${dbCategory}"`);
-    console.log('🔍 Query used:', JSON.stringify(query, null, 2));
+    console.log(`✅ Found ${products.length} products`);
     
-    // ✅ Log categories for debugging
+    // Log sample for debugging
     if (products.length > 0) {
-      const uniqueCategories = [...new Set(products.map(p => p.category))];
-      console.log('📊 Unique categories in results:', uniqueCategories);
-      
-      // Show first few products
-      console.log('📦 Sample products:', products.slice(0, 3).map(p => ({
-        name: p.productName,
+      console.log('Sample products:', products.slice(0, 2).map(p => ({
+        name: p.productName.substring(0, 30),
         category: p.category,
         brand: p.brand
       })));
     }
     
-    // ✅ STEP 9: Send response
     res.status(200).json({
       success: true,
-      message: `Found ${products.length} products in ${dbCategory}`,
-      category: dbCategory,
+      message: `Found ${products.length} products`,
+      category: mappedCategory,
       categorySlug: category,
       products,
       filters: {
-        brands: brands.filter(b => b && b.trim() !== '').sort(),
+        brands: brandsList.filter(b => b && b.trim() !== '').sort(),
         conditions: ['Brand New With Tag', 'Brand New Without Tag', 'Like New', 'Fairly Used', 'Excellent', 'Good']
       },
       pagination: {
@@ -505,11 +452,10 @@ const getProductsByCategory = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ [PRODUCT CATEGORY] Error:', error);
+    console.error('Category Products Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message,
-      errorDetails: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: 'Server error: ' + error.message
     });
   }
 };
@@ -520,28 +466,15 @@ const getProductsByBrand = async (req, res) => {
     const { brand } = req.params;
     const { category, page = 1, limit = 20 } = req.query;
     
-    console.log('Fetching products for brand:', brand);
-    
     let query = { 
       status: 'active',
       brand: { $regex: new RegExp(`^${brand}$`, 'i') }
     };
     
     if (category && category !== 'all') {
-      // ✅ Use strict category mapping
       const standardizedCategory = strictCategoryMapping(category);
-      
-      // Handle fashion categories specially
-      if (standardizedCategory === "Men's Fashion" || standardizedCategory === "Mens Fashion") {
-        query.category = "Men's Fashion";
-      } else if (standardizedCategory === "Women's Fashion" || standardizedCategory === "Womens Fashion") {
-        query.category = "Women's Fashion";
-      } else {
-        query.category = { $regex: new RegExp(`^${standardizedCategory}$`, 'i') };
-      }
+      query.category = standardizedCategory;
     }
-    
-    console.log('Query:', query);
 
     const skip = (page - 1) * limit;
 
@@ -552,8 +485,6 @@ const getProductsByBrand = async (req, res) => {
       .select('productName brand category finalPrice images views likes createdAt condition');
 
     const total = await Product.countDocuments(query);
-    
-    console.log('Found products:', products.length);
 
     res.status(200).json({
       success: true,
@@ -657,7 +588,7 @@ const getProduct = async (req, res) => {
   }
 };
 
-// ✅ UPDATE PRODUCT - USER CAN UPDATE OWN PRODUCT
+// ✅ UPDATE PRODUCT
 const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -682,21 +613,16 @@ const updateProduct = async (req, res) => {
 
     const updateData = { ...req.body };
     
-    // ✅ If category is being updated, apply strict mapping
     if (updateData.category) {
       updateData.category = strictCategoryMapping(updateData.category);
     }
     
-    // Handle image updates if files are provided
     if (req.files && req.files.length > 0) {
       const imageUrls = [];
       
       for (const file of req.files) {
         try {
-          if (!file.buffer) {
-            console.log('⚠️ File has no buffer');
-            continue;
-          }
+          if (!file.buffer) continue;
 
           const cloudinaryConfig = {
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -758,13 +684,9 @@ const updateProduct = async (req, res) => {
   }
 };
 
-// ✅ DELETE PRODUCT - USER & ADMIN DONO KE LIYE
+// ✅ DELETE PRODUCT
 const deleteProduct = async (req, res) => {
   try {
-    console.log('=== 🗑️ DELETE PRODUCT START ===');
-    console.log('📥 Product ID:', req.params.id);
-    console.log('👤 User object:', req.user);
-    
     const product = await Product.findById(req.params.id);
     
     if (!product) {
@@ -774,42 +696,18 @@ const deleteProduct = async (req, res) => {
       });
     }
     
-    console.log('✅ Product found:', {
-      id: product._id,
-      name: product.productName,
-      seller: product.seller.toString(),
-      sellerName: product.sellerName
-    });
-    
     const user = req.user;
-    console.log('👤 Current user:', {
-      userId: user.userId,
-      email: user.email,
-      role: user.role
-    });
-    
-    // ✅ IMPORTANT FIX: User apna product delete kar sake
     const isOwner = product.seller.toString() === user.userId;
     const isAdmin = user.role === 'admin';
     
-    console.log('🔐 Authorization check:', {
-      isOwner,
-      isAdmin,
-      canDelete: isOwner || isAdmin
-    });
-    
     if (!isOwner && !isAdmin) {
-      console.log('❌ Not authorized to delete');
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to delete this product. Only product owner or admin can delete.'
+        message: 'Not authorized to delete this product'
       });
     }
     
-    // ✅ Delete the product
     await Product.findByIdAndDelete(req.params.id);
-    
-    console.log(`✅ Product deleted by ${isAdmin ? 'admin' : 'owner'}`);
     
     res.status(200).json({
       success: true,
@@ -817,7 +715,7 @@ const deleteProduct = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Delete Product Error:', error);
+    console.error('Delete Product Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -860,25 +758,15 @@ const searchProducts = async (req, res) => {
     }
     
     if (category && category !== 'all') {
-      // ✅ Use strict category mapping
       const standardizedCategory = strictCategoryMapping(category);
-      
-      // Handle fashion categories specially
-      if (standardizedCategory === "Men's Fashion" || standardizedCategory === "Mens Fashion") {
-        query.category = "Men's Fashion";
-      } else if (standardizedCategory === "Women's Fashion" || standardizedCategory === "Womens Fashion") {
-        query.category = "Women's Fashion";
-      } else {
-        query.category = { $regex: new RegExp(`^${standardizedCategory}$`, 'i') };
-      }
+      query.category = standardizedCategory;
     }
     
     if (q) {
       query.$or = [
         { productName: { $regex: q, $options: 'i' } },
         { brand: { $regex: q, $options: 'i' } },
-        { description: { $regex: q, $options: 'i' } },
-        { category: { $regex: q, $options: 'i' } }
+        { description: { $regex: q, $options: 'i' } }
       ];
     }
 
@@ -901,7 +789,7 @@ const searchProducts = async (req, res) => {
   }
 };
 
-// ✅ TEST CLOUDINARY ENDPOINT
+// ✅ TEST CLOUDINARY
 const testCloudinary = async (req, res) => {
   try {
     const cloudinaryConfig = {
