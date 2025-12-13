@@ -426,31 +426,57 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ FIXED: GET USER PRODUCTS - UPDATED VERSION
+// ✅ FIXED: GET USER PRODUCTS - COMPLETE WORKING VERSION
 const getUserProducts = async (req, res) => {
+  console.log('🔄 getUserProducts function called');
+  
   try {
-    console.log('🔄 getUserProducts called');
-    
-    // ✅ FIX: Use req.user.id (not req.user.userId)
-    const userId = req.user?.id || req.user?._id;
-    
-    console.log('👤 User from req.user:', req.user);
-    console.log('🆔 User ID extracted:', userId);
-    
-    if (!userId) {
-      console.log('❌ No user ID found in req.user');
+    // Step 1: Check if user exists
+    if (!req.user) {
+      console.log('❌ ERROR: req.user is undefined');
       return res.status(401).json({
         success: false,
-        message: 'Authentication required'
+        message: 'Authentication required - No user found in request'
       });
     }
     
+    console.log('👤 req.user object:', req.user);
+    console.log('🔑 Available keys in req.user:', Object.keys(req.user));
+    
+    // Step 2: Try ALL possible user ID properties
+    // ✅ IMPORTANT: Your authMiddleware sets userId, not id
+    const userId = req.user.userId || req.user.id || req.user._id;
+    
+    console.log('🆔 User ID extracted:', userId);
+    console.log('🔍 Extraction details:', {
+      'req.user.userId': req.user.userId,
+      'req.user.id': req.user.id,
+      'req.user._id': req.user._id
+    });
+    
+    if (!userId) {
+      console.log('❌ ERROR: No user ID found');
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found',
+        debug: {
+          userObject: req.user,
+          allKeys: Object.keys(req.user)
+        }
+      });
+    }
+    
+    console.log(`🔍 Querying database for seller: ${userId}`);
+    
+    // Step 3: Query database
     const products = await Product.find({ seller: userId })
-      .sort({ createdAt: -1 });
-
+      .sort({ createdAt: -1 })
+      .lean();
+    
     console.log(`✅ Found ${products.length} products for user ${userId}`);
-
-    res.status(200).json({
+    
+    // Step 4: Format response
+    const responseData = {
       success: true,
       count: products.length,
       products: products.map(product => ({
@@ -463,20 +489,22 @@ const getUserProducts = async (req, res) => {
         description: product.description,
         askingPrice: product.askingPrice,
         finalPrice: product.finalPrice,
-        images: product.images,
-        status: product.status,
+        images: product.images || [],
+        status: product.status || 'active',
+        seller: product.seller,
+        sellerName: product.sellerName,
+        sellerUsername: product.sellerUsername,
         createdAt: product.createdAt,
         updatedAt: product.updatedAt,
         views: product.views || 0,
-        likes: product.likes || 0,
-        seller: product.seller,
-        sellerName: product.sellerName,
-        sellerUsername: product.sellerUsername
+        likes: product.likes || 0
       }))
-    });
+    };
+    
+    res.status(200).json(responseData);
     
   } catch (error) {
-    console.error('❌ Get User Products Error:', error);
+    console.error('❌ ERROR in getUserProducts:', error.message);
     console.error('❌ Error stack:', error.stack);
     
     res.status(500).json({
