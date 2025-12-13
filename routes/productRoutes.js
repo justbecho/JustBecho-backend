@@ -6,7 +6,7 @@ import {
   updateProduct,
   deleteProduct,
   getAllProducts,
-  getProductsByCategory, // ✅ Updated function
+  getProductsByCategory,
   getProductsByBrand,
   getAllBrands,
   getFeaturedProducts,
@@ -26,10 +26,9 @@ router.get("/brands/all", getAllBrands);
 router.get("/brand/:brand", getProductsByBrand);
 
 // ✅ CATEGORY ROUTE - MUST COME BEFORE GENERIC ROUTES
-router.get("/category/:category", getProductsByCategory); // ✅ PERMANENT FIX
+router.get("/category/:category", getProductsByCategory);
 
-// ✅ OTHER ROUTES
-router.get("/my-products", authMiddleware, getUserProducts);
+// ✅ OTHER PUBLIC ROUTES
 router.get("/featured", getFeaturedProducts);
 router.get("/search", searchProducts);
 
@@ -37,14 +36,26 @@ router.get("/search", searchProducts);
 router.get("/", getAllProducts);
 router.get("/:id", getProduct);
 
-// ✅ PROTECTED ROUTES
+// ============================================
+// ✅ PROTECTED ROUTES - REQUIRE AUTHENTICATION
+// ============================================
+
+// ✅ USER: Get my products (authenticated users only)
+router.get("/my-products", authMiddleware, getUserProducts);
+
+// ✅ USER: Create new product (authenticated users only)
 router.post("/", 
   authMiddleware,
   uploadMiddleware,
   createProduct
 );
 
+// ✅ USER/ADMIN: Update product
+// User can update own product, Admin can update any product
 router.put("/:id", authMiddleware, updateProduct);
+
+// ✅ USER/ADMIN: Delete product  
+// User can delete own product, Admin can delete any product
 router.delete("/:id", authMiddleware, deleteProduct);
 
 export default router;

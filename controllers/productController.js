@@ -317,8 +317,12 @@ const getUserProducts = async (req, res) => {
       });
     }
     
+    console.log('📦 Fetching products for user:', userId);
+    
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 });
+
+    console.log(`✅ Found ${products.length} products for user ${userId}`);
 
     res.status(200).json({
       success: true,
@@ -332,7 +336,8 @@ const getUserProducts = async (req, res) => {
         status: product.status,
         createdAt: product.createdAt,
         views: product.views,
-        likes: product.likes
+        likes: product.likes,
+        seller: product.seller
       }))
     });
   } catch (error) {
@@ -630,7 +635,7 @@ const getProduct = async (req, res) => {
   }
 };
 
-// ✅ UPDATE PRODUCT
+// ✅ UPDATE PRODUCT - USER CAN UPDATE OWN PRODUCT
 const updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -710,7 +715,7 @@ const updateProduct = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Product updated successfully',
+      message: isAdmin ? 'Product updated by admin' : 'Product updated successfully',
       product: updatedProduct
     });
   } catch (error) {
@@ -731,11 +736,12 @@ const updateProduct = async (req, res) => {
   }
 };
 
-// ✅ DELETE PRODUCT
+// ✅ DELETE PRODUCT - USER & ADMIN DONO KE LIYE
 const deleteProduct = async (req, res) => {
   try {
     console.log('=== 🗑️ DELETE PRODUCT START ===');
     console.log('📥 Product ID:', req.params.id);
+    console.log('👤 User object:', req.user);
     
     const product = await Product.findById(req.params.id);
     
@@ -746,19 +752,42 @@ const deleteProduct = async (req, res) => {
       });
     }
     
+    console.log('✅ Product found:', {
+      id: product._id,
+      name: product.productName,
+      seller: product.seller.toString(),
+      sellerName: product.sellerName
+    });
+    
     const user = req.user;
+    console.log('👤 Current user:', {
+      userId: user.userId,
+      email: user.email,
+      role: user.role
+    });
+    
+    // ✅ IMPORTANT FIX: User apna product delete kar sake
     const isOwner = product.seller.toString() === user.userId;
     const isAdmin = user.role === 'admin';
+    
+    console.log('🔐 Authorization check:', {
+      isOwner,
+      isAdmin,
+      canDelete: isOwner || isAdmin
+    });
     
     if (!isOwner && !isAdmin) {
       console.log('❌ Not authorized to delete');
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to delete this product'
+        message: 'Not authorized to delete this product. Only product owner or admin can delete.'
       });
     }
     
+    // ✅ Delete the product
     await Product.findByIdAndDelete(req.params.id);
+    
+    console.log(`✅ Product deleted by ${isAdmin ? 'admin' : 'owner'}`);
     
     res.status(200).json({
       success: true,
