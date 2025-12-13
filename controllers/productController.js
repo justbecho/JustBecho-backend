@@ -426,11 +426,19 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ GET USER PRODUCTS
+// ✅ FIXED: GET USER PRODUCTS - UPDATED VERSION
 const getUserProducts = async (req, res) => {
   try {
-    const userId = req.user?.userId;
+    console.log('🔄 getUserProducts called');
+    
+    // ✅ FIX: Use req.user.id (not req.user.userId)
+    const userId = req.user?.id || req.user?._id;
+    
+    console.log('👤 User from req.user:', req.user);
+    console.log('🆔 User ID extracted:', userId);
+    
     if (!userId) {
+      console.log('❌ No user ID found in req.user');
       return res.status(401).json({
         success: false,
         message: 'Authentication required'
@@ -440,27 +448,41 @@ const getUserProducts = async (req, res) => {
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 });
 
+    console.log(`✅ Found ${products.length} products for user ${userId}`);
+
     res.status(200).json({
       success: true,
+      count: products.length,
       products: products.map(product => ({
-        id: product._id,
+        _id: product._id,
         productName: product.productName,
         brand: product.brand,
         category: product.category,
+        productType: product.productType,
+        condition: product.condition,
+        description: product.description,
+        askingPrice: product.askingPrice,
         finalPrice: product.finalPrice,
-        images: product.images.map(img => img.url),
+        images: product.images,
         status: product.status,
         createdAt: product.createdAt,
-        views: product.views,
-        likes: product.likes,
-        seller: product.seller
+        updatedAt: product.updatedAt,
+        views: product.views || 0,
+        likes: product.likes || 0,
+        seller: product.seller,
+        sellerName: product.sellerName,
+        sellerUsername: product.sellerUsername
       }))
     });
+    
   } catch (error) {
-    console.error('Get User Products Error:', error);
+    console.error('❌ Get User Products Error:', error);
+    console.error('❌ Error stack:', error.stack);
+    
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: 'Server error: ' + error.message,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
