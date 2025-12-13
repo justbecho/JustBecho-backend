@@ -25,22 +25,19 @@ router.get("/test/cloudinary", testCloudinary);
 router.get("/brands/all", getAllBrands);
 router.get("/brand/:brand", getProductsByBrand);
 
-// ✅ CATEGORY ROUTE - MUST COME BEFORE GENERIC ROUTES
+// ✅ CATEGORY ROUTE
 router.get("/category/:category", getProductsByCategory);
 
 // ✅ OTHER PUBLIC ROUTES
 router.get("/featured", getFeaturedProducts);
 router.get("/search", searchProducts);
 
-// ✅ PUBLIC ROUTES (Keep at bottom to avoid conflict)
-router.get("/", getAllProducts);
-router.get("/:id", getProduct);
-
 // ============================================
 // ✅ PROTECTED ROUTES - REQUIRE AUTHENTICATION
 // ============================================
 
 // ✅ USER: Get my products (authenticated users only)
+// ⚠️ MUST COME BEFORE THE GENERIC :id ROUTE!
 router.get("/my-products", authMiddleware, getUserProducts);
 
 // ✅ USER: Create new product (authenticated users only)
@@ -50,12 +47,14 @@ router.post("/",
   createProduct
 );
 
+// ✅ PUBLIC ROUTES (Keep at bottom)
+router.get("/", getAllProducts);
+router.get("/:id", getProduct); // ⚠️ This should be AFTER specific routes
+
 // ✅ USER/ADMIN: Update product
-// User can update own product, Admin can update any product
 router.put("/:id", authMiddleware, updateProduct);
 
 // ✅ USER/ADMIN: Delete product  
-// User can delete own product, Admin can delete any product
 router.delete("/:id", authMiddleware, deleteProduct);
 
 export default router;
