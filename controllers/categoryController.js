@@ -1,35 +1,104 @@
 import Category from "../models/Category.js";
 import Product from "../models/Product.js";
 
-// ✅ SIMPLE CATEGORY MAPPING
-const simpleCategoryMapping = (slug) => {
-  const map = {
-    'men': 'Men',
-    'mens': 'Men',
-    'men-fashion': 'Men',
-    'mens-fashion': 'Men',
+// ✅ GET PRODUCTS BY CATEGORY SLUG - FIXED EXACT MATCHING
+export const getCategoryProducts = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
     
-    'women': 'Women',
-    'womens': 'Women',
-    'women-fashion': 'Women',
-    'womens-fashion': 'Women',
+    console.log('🔍 Category products for slug:', slug);
     
-    'footwear': 'Footwear',
-    'shoes': 'Footwear',
+    // Find category from database
+    const category = await Category.findOne({
+      $or: [
+        { href: { $regex: new RegExp(slug, 'i') } },
+        { name: { $regex: new RegExp(slug, 'i') } },
+        { slug: { $regex: new RegExp(slug, 'i') } }
+      ],
+      isActive: true
+    });
     
-    'accessories': 'Accessories',
+    if (!category) {
+      console.log('❌ Category not found in DB for slug:', slug);
+      return res.status(404).json({
+        success: false,
+        message: 'Category not found'
+      });
+    }
     
-    'watches': 'Watches',
+    const categoryName = category.name;
+    console.log('✅ Found category in DB:', categoryName);
     
-    'perfumes': 'Perfumes',
+    // ✅ IMPORTANT: Use EXACT case-insensitive match
+    // This ensures "MEN'S FASHION" doesn't match "WOMEN'S FASHION"
+    let query = { 
+      status: 'active',
+      category: { $regex: new RegExp(`^${categoryName}$`, 'i') }
+    };
     
-    'toys': 'Toys',
-    'toys-collectibles': 'Toys',
+    console.log('🔍 Query for products:', query);
     
-    'kids': 'Kids'
-  };
-  
-  return map[slug.toLowerCase()] || slug.charAt(0).toUpperCase() + slug.slice(1);
+    // Add brand filter
+    if (brand && brand !== 'all') {
+      query.brand = { $regex: new RegExp(brand, 'i') };
+    }
+    
+    // Sorting
+    let sortOption = { createdAt: -1 };
+    if (sort === 'price-low') sortOption = { finalPrice: 1 };
+    if (sort === 'price-high') sortOption = { finalPrice: -1 };
+    if (sort === 'popular') sortOption = { views: -1, likes: -1 };
+    
+    // Pagination
+    const skip = (page - 1) * limit;
+    
+    // Execute query
+    const products = await Product.find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(Number(limit))
+      .select('productName brand category finalPrice images views likes createdAt condition sellerName');
+    
+    const total = await Product.countDocuments(query);
+    
+    // Get unique brands
+    const brandsList = await Product.distinct('brand', query);
+    
+    console.log(`✅ Found ${products.length} products for exact category: "${categoryName}"`);
+    
+    // Log actual categories found
+    if (products.length > 0) {
+      const actualCategories = [...new Set(products.map(p => p.category))];
+      console.log('📊 Actual categories in results:', actualCategories);
+    }
+    
+    res.status(200).json({
+      success: true,
+      category: categoryName,
+      slug: slug,
+      products,
+      filters: {
+        brands: brandsList.filter(b => b && b.trim() !== '').sort(),
+        conditions: ['Brand New With Tag', 'Brand New Without Tag', 'Like New', 'Fairly Used', 'Excellent', 'Good']
+      },
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: (page * limit) < total,
+        hasPrevPage: page > 1
+      }
+    });
+    
+  } catch (error) {
+    console.error('Category Products Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error: ' + error.message
+    });
+  }
 };
 
 // ✅ GET ALL CATEGORIES
@@ -40,7 +109,7 @@ export const getAllCategories = async (req, res) => {
     const categoriesWithCounts = await Promise.all(
       categories.map(async (category) => {
         const productCount = await Product.countDocuments({
-          category: category.name,
+          category: { $regex: new RegExp(`^${category.name}$`, 'i') },
           status: 'active'
         });
         
@@ -97,96 +166,6 @@ export const getCategoryBySlug = async (req, res) => {
     });
   } catch (error) {
     console.error('Get Category By Slug Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-};
-
-// ✅ GET PRODUCTS BY CATEGORY SLUG - SIMPLE
-export const getCategoryProducts = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
-    
-    console.log('🔍 Category products for slug:', slug);
-    
-    // Find category from database
-    const category = await Category.findOne({
-      $or: [
-        { href: { $regex: new RegExp(slug, 'i') } },
-        { name: { $regex: new RegExp(slug, 'i') } },
-        { slug: { $regex: new RegExp(slug, 'i') } }
-      ],
-      isActive: true
-    });
-    
-    let categoryName;
-    if (category) {
-      categoryName = category.name;
-      console.log('Found category in DB:', categoryName);
-    } else {
-      // Use mapping if not found in DB
-      categoryName = simpleCategoryMapping(slug);
-      console.log('Using mapped category:', categoryName);
-    }
-    
-    // Build query
-    let query = { 
-      status: 'active',
-      category: { $regex: new RegExp(categoryName, 'i') }
-    };
-    
-    // Add brand filter
-    if (brand && brand !== 'all') {
-      query.brand = { $regex: new RegExp(brand, 'i') };
-    }
-    
-    // Sorting
-    let sortOption = { createdAt: -1 };
-    if (sort === 'price-low') sortOption = { finalPrice: 1 };
-    if (sort === 'price-high') sortOption = { finalPrice: -1 };
-    if (sort === 'popular') sortOption = { views: -1, likes: -1 };
-    
-    // Pagination
-    const skip = (page - 1) * limit;
-    
-    // Execute query
-    const products = await Product.find(query)
-      .sort(sortOption)
-      .skip(skip)
-      .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition sellerName');
-    
-    const total = await Product.countDocuments(query);
-    
-    // Get unique brands
-    const brandsList = await Product.distinct('brand', query);
-    
-    console.log(`✅ Found ${products.length} products for ${categoryName}`);
-    
-    res.status(200).json({
-      success: true,
-      category: categoryName,
-      slug: slug,
-      products,
-      filters: {
-        brands: brandsList.filter(b => b && b.trim() !== '').sort(),
-        conditions: ['Brand New With Tag', 'Brand New Without Tag', 'Like New', 'Fairly Used', 'Excellent', 'Good']
-      },
-      pagination: {
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: (page * limit) < total,
-        hasPrevPage: page > 1
-      }
-    });
-    
-  } catch (error) {
-    console.error('Category Products Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message
@@ -364,12 +343,12 @@ export const getCategoryStats = async (req, res) => {
     const stats = await Promise.all(
       categories.map(async (category) => {
         const productCount = await Product.countDocuments({
-          category: category.name,
+          category: { $regex: new RegExp(`^${category.name}$`, 'i') },
           status: 'active'
         });
         
         const recentProducts = await Product.countDocuments({
-          category: category.name,
+          category: { $regex: new RegExp(`^${category.name}$`, 'i') },
           status: 'active',
           createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
         });
