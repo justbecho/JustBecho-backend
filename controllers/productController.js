@@ -2,7 +2,7 @@ import Product from "../models/Product.js";
 import User from "../models/User.js";
 import { v2 as cloudinary } from 'cloudinary';
 
-// ✅ STRICT CATEGORY MAPPING
+// ✅ STRICT CATEGORY MAPPING - FIXED VERSION
 const strictCategoryMapping = (category) => {
   const map = {
     // Men's - All variations to EXACT database name
@@ -32,41 +32,41 @@ const strictCategoryMapping = (category) => {
     "footwear": "Footwear",
     "Shoes": "Footwear",
     "shoes": "Footwear",
-    "Sneakers": "Footwear",
-    "sneakers": "Footwear",
     
     "Accessories": "Accessories",
     "accessories": "Accessories",
-    "Accessory": "Accessories",
-    "accessory": "Accessories",
     
     "Watches": "Watches",
     "watches": "Watches",
-    "Watch": "Watches",
-    "watch": "Watches",
     
     "Perfumes": "Perfumes",
     "perfumes": "Perfumes",
-    "Perfume": "Perfumes",
-    "perfume": "Perfumes",
-    "Fragrances": "Perfumes",
-    "fragrances": "Perfumes",
     
     "TOYS & COLLECTIBLES": "TOYS & COLLECTIBLES",
     "Toys & Collectibles": "TOYS & COLLECTIBLES",
     "Toys": "TOYS & COLLECTIBLES",
     "toys": "TOYS & COLLECTIBLES",
-    "Collectibles": "TOYS & COLLECTIBLES",
-    "collectibles": "TOYS & COLLECTIBLES",
     
     "KIDS": "KIDS",
     "Kids": "KIDS",
-    "kids": "KIDS",
-    "Kids Fashion": "KIDS",
-    "kids-fashion": "KIDS"
+    "kids": "KIDS"
   };
   
-  return map[category] || category;
+  // First check exact match
+  if (map[category]) {
+    return map[category];
+  }
+  
+  // Check case-insensitive match
+  const lowerCategory = category.toLowerCase();
+  for (const key in map) {
+    if (key.toLowerCase() === lowerCategory) {
+      return map[key];
+    }
+  }
+  
+  // If no match found, return original
+  return category;
 };
 
 // ✅ CREATE PRODUCT - WITH CATEGORY FIX
@@ -409,13 +409,13 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ FIXED: GET PRODUCTS BY CATEGORY (STRICT MATCHING)
+// ✅ FIXED: GET PRODUCTS BY CATEGORY (EXACT MATCHING)
 const getProductsByCategory = async (req, res) => {
   try {
     let { category } = req.params;
     const { page = 1, limit = 12, brand, sort = 'newest' } = req.query;
     
-    console.log('🎯 [CATEGORY PRODUCTS] Request for category:', category);
+    console.log('🎯 [PRODUCT CATEGORY] Request for category:', category);
     console.log('Query params:', { page, limit, brand, sort });
     
     // ✅ STEP 1: Decode URL and standardize
@@ -425,11 +425,20 @@ const getProductsByCategory = async (req, res) => {
     const dbCategory = strictCategoryMapping(category);
     console.log(`🗺️ Strict category mapping: "${category}" → "${dbCategory}"`);
     
-    // ✅ STEP 3: STRICT QUERY - EXACT CATEGORY MATCH ONLY
+    // ✅ STEP 3: EXACT QUERY - Use exact match instead of regex
     let query = { 
-      status: 'active',
-      category: dbCategory // ✅ EXACT MATCH ONLY
+      status: 'active'
     };
+    
+    // Handle special cases for Men's and Women's Fashion
+    if (dbCategory === "Men's Fashion" || dbCategory === "Mens Fashion") {
+      query.category = "Men's Fashion";
+    } else if (dbCategory === "Women's Fashion" || dbCategory === "Womens Fashion") {
+      query.category = "Women's Fashion";
+    } else {
+      // For other categories, use exact case-insensitive match
+      query.category = { $regex: new RegExp(`^${dbCategory}$`, 'i') };
+    }
     
     // ✅ STEP 4: Add brand filter if provided
     if (brand && brand !== 'all') {
@@ -458,11 +467,16 @@ const getProductsByCategory = async (req, res) => {
     // ✅ STEP 8: Get unique brands for this EXACT category
     const brands = await Product.distinct('brand', query);
     
-    console.log(`✅ [CATEGORY PRODUCTS] Found ${products.length} products with EXACT category: "${dbCategory}"`);
+    console.log(`✅ [PRODUCT CATEGORY] Found ${products.length} products with EXACT category: "${dbCategory}"`);
+    console.log('🔍 Query used:', JSON.stringify(query, null, 2));
     
-    // ✅ Log first few products for debugging
+    // ✅ Log categories for debugging
     if (products.length > 0) {
-      console.log('📊 Sample products:', products.slice(0, 3).map(p => ({
+      const uniqueCategories = [...new Set(products.map(p => p.category))];
+      console.log('📊 Unique categories in results:', uniqueCategories);
+      
+      // Show first few products
+      console.log('📦 Sample products:', products.slice(0, 3).map(p => ({
         name: p.productName,
         category: p.category,
         brand: p.brand
@@ -491,7 +505,7 @@ const getProductsByCategory = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ [CATEGORY PRODUCTS] Error:', error);
+    console.error('❌ [PRODUCT CATEGORY] Error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error: ' + error.message,
@@ -516,7 +530,15 @@ const getProductsByBrand = async (req, res) => {
     if (category && category !== 'all') {
       // ✅ Use strict category mapping
       const standardizedCategory = strictCategoryMapping(category);
-      query.category = standardizedCategory;
+      
+      // Handle fashion categories specially
+      if (standardizedCategory === "Men's Fashion" || standardizedCategory === "Mens Fashion") {
+        query.category = "Men's Fashion";
+      } else if (standardizedCategory === "Women's Fashion" || standardizedCategory === "Womens Fashion") {
+        query.category = "Women's Fashion";
+      } else {
+        query.category = { $regex: new RegExp(`^${standardizedCategory}$`, 'i') };
+      }
     }
     
     console.log('Query:', query);
@@ -840,7 +862,15 @@ const searchProducts = async (req, res) => {
     if (category && category !== 'all') {
       // ✅ Use strict category mapping
       const standardizedCategory = strictCategoryMapping(category);
-      query.category = standardizedCategory;
+      
+      // Handle fashion categories specially
+      if (standardizedCategory === "Men's Fashion" || standardizedCategory === "Mens Fashion") {
+        query.category = "Men's Fashion";
+      } else if (standardizedCategory === "Women's Fashion" || standardizedCategory === "Womens Fashion") {
+        query.category = "Women's Fashion";
+      } else {
+        query.category = { $regex: new RegExp(`^${standardizedCategory}$`, 'i') };
+      }
     }
     
     if (q) {

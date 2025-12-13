@@ -1,6 +1,73 @@
 import Category from "../models/Category.js";
 import Product from "../models/Product.js";
 
+// ✅ STRICT CATEGORY MAPPING FOR CATEGORY CONTROLLER
+const strictCategoryMappingForController = (category) => {
+  const map = {
+    // Men's - All variations to EXACT database name
+    "Men's Fashion": "Men's Fashion",
+    "Mens Fashion": "Men's Fashion",
+    "Mens": "Men's Fashion",
+    "Men": "Men's Fashion",
+    "men": "Men's Fashion",
+    "mens": "Men's Fashion",
+    "men-fashion": "Men's Fashion",
+    "men's": "Men's Fashion",
+    "men's-fashion": "Men's Fashion",
+    
+    // Women's - All variations to EXACT database name
+    "Women's Fashion": "Women's Fashion",
+    "Womens Fashion": "Women's Fashion",
+    "Womens": "Women's Fashion",
+    "Women": "Women's Fashion",
+    "women": "Women's Fashion",
+    "womens": "Women's Fashion",
+    "women-fashion": "Women's Fashion",
+    "women's": "Women's Fashion",
+    "women's-fashion": "Women's Fashion",
+    
+    // Others - EXACT names as stored in database
+    "Footwear": "Footwear",
+    "footwear": "Footwear",
+    "Shoes": "Footwear",
+    "shoes": "Footwear",
+    
+    "Accessories": "Accessories",
+    "accessories": "Accessories",
+    
+    "Watches": "Watches",
+    "watches": "Watches",
+    
+    "Perfumes": "Perfumes",
+    "perfumes": "Perfumes",
+    
+    "TOYS & COLLECTIBLES": "TOYS & COLLECTIBLES",
+    "Toys & Collectibles": "TOYS & COLLECTIBLES",
+    "Toys": "TOYS & COLLECTIBLES",
+    "toys": "TOYS & COLLECTIBLES",
+    
+    "KIDS": "KIDS",
+    "Kids": "KIDS",
+    "kids": "KIDS"
+  };
+  
+  // First check exact match
+  if (map[category]) {
+    return map[category];
+  }
+  
+  // Check case-insensitive match
+  const lowerCategory = category.toLowerCase();
+  for (const key in map) {
+    if (key.toLowerCase() === lowerCategory) {
+      return map[key];
+    }
+  }
+  
+  // If no match found, return original
+  return category;
+};
+
 // ✅ GET ALL CATEGORIES
 export const getAllCategories = async (req, res) => {
   try {
@@ -80,7 +147,7 @@ export const getCategoryBySlug = async (req, res) => {
   }
 };
 
-// ✅ GET PRODUCTS BY CATEGORY SLUG
+// ✅ GET PRODUCTS BY CATEGORY SLUG - FIXED
 export const getCategoryProducts = async (req, res) => {
   try {
     const { slug } = req.params;
@@ -102,34 +169,10 @@ export const getCategoryProducts = async (req, res) => {
     if (!category) {
       console.log('❌ [CATEGORY PRODUCTS] Category not found in DB for slug:', slug);
       
-      // If category not found in DB, use direct mapping
-      const categoryMap = {
-        'men': "Men's Fashion",
-        'mens': "Men's Fashion",
-        'men-fashion': "Men's Fashion",
-        'mens-fashion': "Men's Fashion",
-        
-        'women': "Women's Fashion",
-        'womens': "Women's Fashion",
-        'women-fashion': "Women's Fashion",
-        'womens-fashion': "Women's Fashion",
-        
-        'footwear': "Footwear",
-        'shoes': "Footwear",
-        
-        'accessories': "Accessories",
-        
-        'watches': "Watches",
-        
-        'perfumes': "Perfumes",
-        
-        'toys': "TOYS & COLLECTIBLES",
-        'toys-collectibles': "TOYS & COLLECTIBLES",
-        
-        'kids': "KIDS"
-      };
-      
-      const dbCategory = categoryMap[slug] || slug.replace(/-/g, ' ');
+      // ✅ FIXED: Use the same strict mapping as product controller
+      const dbCategory = strictCategoryMappingForController(
+        slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ')
+      );
       console.log('🔄 [CATEGORY PRODUCTS] Using mapped category:', dbCategory);
       
       return await getProductsForCategory(dbCategory, req, res);
@@ -147,18 +190,33 @@ export const getCategoryProducts = async (req, res) => {
   }
 };
 
-// ✅ HELPER FUNCTION: Get products for a category
+// ✅ HELPER FUNCTION: Get products for a category - FIXED
 const getProductsForCategory = async (categoryName, req, res) => {
   try {
     const { page = 1, limit = 12, brand, minPrice, maxPrice, condition, sort = 'newest' } = req.query;
     
     console.log('🎯 [HELPER] Getting products for category:', categoryName);
     
-    // Build query
+    // ✅ FIXED: Use EXACT MATCH instead of regex for men's and women's fashion
     let query = { 
-      status: 'active',
-      category: { $regex: new RegExp(categoryName, 'i') }
+      status: 'active'
     };
+    
+    // Apply strict matching for fashion categories
+    if (categoryName.toLowerCase().includes('men') || 
+        categoryName === "Men's Fashion" || 
+        categoryName === "Mens Fashion") {
+      // ✅ EXACT match for Men's Fashion
+      query.category = "Men's Fashion";
+    } else if (categoryName.toLowerCase().includes('women') || 
+               categoryName === "Women's Fashion" || 
+               categoryName === "Womens Fashion") {
+      // ✅ EXACT match for Women's Fashion
+      query.category = "Women's Fashion";
+    } else {
+      // For other categories, use case-insensitive match
+      query.category = { $regex: new RegExp(`^${categoryName}$`, 'i') };
+    }
     
     // Apply filters
     if (brand && brand !== 'all') {
@@ -203,7 +261,7 @@ const getProductsForCategory = async (categoryName, req, res) => {
     const priceStats = await Product.aggregate([
       {
         $match: {
-          category: { $regex: new RegExp(categoryName, 'i') },
+          category: query.category,
           status: 'active',
           finalPrice: { $exists: true }
         }
@@ -219,7 +277,14 @@ const getProductsForCategory = async (categoryName, req, res) => {
     
     const priceRange = priceStats[0] || { minPrice: 0, maxPrice: 0 };
     
-    console.log(`✅ [HELPER] Found ${products.length} products`);
+    console.log(`✅ [HELPER] Found ${products.length} products for category: "${categoryName}"`);
+    console.log('🔍 Query used:', JSON.stringify(query, null, 2));
+    
+    // Debug: Check categories of returned products
+    if (products.length > 0) {
+      const uniqueCategories = [...new Set(products.map(p => p.category))];
+      console.log('📊 Unique categories in results:', uniqueCategories);
+    }
     
     res.status(200).json({
       success: true,
