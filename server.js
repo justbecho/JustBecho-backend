@@ -1,7 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import passport from "passport";
+import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
@@ -11,6 +11,7 @@ dotenv.config();
 
 console.log('🚀 Server starting...');
 console.log('📊 Environment:', process.env.NODE_ENV || 'development');
+console.log('💳 Razorpay Key Available:', !!process.env.RAZORPAY_LIVE_KEY_ID);
 
 // Hardcode Telegram Token if needed
 if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -33,11 +34,35 @@ console.log('☁️ Cloudinary Config Status:', {
   api_secret: process.env.CLOUDINARY_API_SECRET ? '✅ Set' : '❌ Missing'
 });
 
-// Import configurations
-import "./config/googleAuth.js";
-import "./config/telegramBot.js";
+// ES modules fix for __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-import connectDB from "./config/db.js";
+// ✅ MONGOOSE CONNECTION
+const connectDB = async () => {
+  try {
+    const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
+    
+    await mongoose.connect(MONGODB_URI, {
+      // ✅ Updated options without deprecated ones
+      serverSelectionTimeoutMS: 5000,
+      maxPoolSize: 10
+    });
+    
+    console.log('✅ MongoDB Connected Successfully');
+  } catch (error) {
+    console.error('❌ MongoDB Connection Error:', error.message);
+    process.exit(1);
+  }
+};
+
+// ✅ IMPORT MODELS (Important for populate to work)
+import './models/User.js';
+import './models/Product.js';
+import './models/Cart.js';
+import './models/Order.js'; // ✅ NEW: Order model
+
+// ✅ IMPORT ROUTES
 import authRoutes from "./routes/authRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import wishlistRoutes from "./routes/Wishlist.js";
@@ -45,17 +70,12 @@ import cartRoutes from "./routes/cartRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
-
-// Connect to database
-connectDB();
-
-// ES modules fix for __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import razorpayOrderRoutes from "./routes/razorpayOrder.js"; // ✅ NEW
+import razorpayVerifyRoutes from "./routes/razorpayVerify.js"; // ✅ NEW
 
 const app = express();
 
-// ✅ FIXED CORS Configuration - VERCEL COMPATIBLE
+// ✅ CORS Configuration
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -69,16 +89,14 @@ const allowedOrigins = [
 
 console.log('🌐 CORS Allowed Origins:', allowedOrigins);
 
-// ✅ MANUAL CORS Middleware - No wildcard options()
+// ✅ MANUAL CORS Middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  // Allow requests with no origin
   if (!origin) {
     return next();
   }
   
-  // Check if origin is allowed
   const isAllowed = allowedOrigins.some(allowed => 
     origin === allowed || origin.includes(allowed.replace('https://', '').replace('http://', ''))
   );
@@ -91,7 +109,6 @@ app.use((req, res, next) => {
       'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Auth-Token');
   }
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -107,7 +124,6 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use((req, res, next) => {
   const startTime = Date.now();
   console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
-  console.log(`📍 Origin: ${req.headers.origin || 'No origin'}`);
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
@@ -120,10 +136,7 @@ app.use((req, res, next) => {
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Initialize passport
-app.use(passport.initialize());
-
-// ✅ Routes
+// ✅ ALL ROUTES
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/wishlist", wishlistRoutes);
@@ -131,6 +144,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/razorpay", razorpayOrderRoutes); // ✅ NEW: Razorpay routes
+app.use("/api/razorpay", razorpayVerifyRoutes); // ✅ NEW: Payment verification
 
 // ✅ Test CORS endpoint
 app.get("/api/test-cors", (req, res) => {
@@ -139,12 +154,7 @@ app.get("/api/test-cors", (req, res) => {
     success: true,
     message: 'CORS test successful',
     origin: req.headers.origin,
-    timestamp: new Date().toISOString(),
-    cors: {
-      allowedOrigins: allowedOrigins,
-      currentOrigin: req.headers.origin || 'none',
-      headers: req.headers
-    }
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -155,8 +165,8 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     services: {
-      database: 'connected',
-      googleOAuth: 'configured',
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      razorpay: !!process.env.RAZORPAY_LIVE_KEY_ID ? 'configured' : 'not configured',
       cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
     }
   });
@@ -165,7 +175,6 @@ app.get("/api/health", (req, res) => {
 // ✅ Simple database test
 app.get("/api/test-db", async (req, res) => {
   try {
-    const mongoose = await import('mongoose');
     const dbState = mongoose.connection.readyState;
     
     const states = {
@@ -193,7 +202,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.5.0",
+    version: "2.6.0",
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -202,6 +211,7 @@ app.get("/", (req, res) => {
       categories: "/api/categories",
       cart: "/api/cart",
       admin: "/api/admin",
+      razorpay: "/api/razorpay", // ✅ NEW
       health: "/api/health",
       testCors: "/api/test-cors",
       testDb: "/api/test-db"
@@ -229,30 +239,29 @@ app.use((error, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 8000;
-
-app.listen(PORT, () => {
-  console.log(`
+// ✅ START SERVER
+const startServer = async () => {
+  try {
+    await connectDB();
+    
+    const PORT = process.env.PORT || 8000;
+    
+    app.listen(PORT, () => {
+      console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.5.0                  ║
-║                 🔧 VERCEL COMPATIBLE FIX                     ║
+║                  🚀 JUST BECHO SERVER 2.6.0                  ║
+║                 💳 RAZORPAY PAYMENT INTEGRATED               ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
   ✅ Environment: ${process.env.NODE_ENV || 'development'}
-  ✅ API URL: http://localhost:${PORT}
-  ✅ Database: Connecting...
+  ✅ Database: Connected
+  ✅ Razorpay: ${process.env.RAZORPAY_LIVE_KEY_ID ? '✅ Configured' : '❌ Not Configured'}
 
-🌐 CORS CONFIGURATION:
-  ✅ ${allowedOrigins.length} allowed origins
-  ✅ Manual CORS headers
-  ✅ Preflight handled
-
-🔧 TEST ENDPOINTS:
-  ✅ /api/test-cors - CORS test
-  ✅ /api/health - Health check
-  ✅ /api/test-db - Database test
+🔧 PAYMENT ENDPOINTS:
+  ✅ /api/razorpay/create-order - Create Razorpay order
+  ✅ /api/razorpay/verify-payment - Verify payment
 
 📡 AVAILABLE API ENDPOINTS:
   🔐 Auth:        http://localhost:${PORT}/api/auth
@@ -262,11 +271,19 @@ app.listen(PORT, () => {
   📁 Categories:  http://localhost:${PORT}/api/categories
   🛒  Cart:        http://localhost:${PORT}/api/cart
   👑 Admin:       http://localhost:${PORT}/api/admin
+  💳 Razorpay:   http://localhost:${PORT}/api/razorpay
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.
 ──────────────────────────────────────────────────────────────
-  `);
-});
+      `);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 export default app;
