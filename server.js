@@ -144,10 +144,25 @@ const corsOptions = {
 // Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+// ✅ FIX: Remove the problematic line 148 or replace it
+// ❌ WRONG: app.options('*', cors(corsOptions));
+// ✅ CORRECT 1: Use regex pattern
+app.options(/.*/, cors(corsOptions));
 
-// ✅ METHOD 2: Manual CORS as backup
+// ✅ CORRECT 2: Or handle preflight manually
+app.options('/*', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('justbecho.com') || origin.includes('vercel.app'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Auth-Token, X-API-Key');
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(200).end();
+});
+
+// ✅ METHOD 2: Manual CORS as backup (Simplify this)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -156,14 +171,8 @@ app.use((req, res, next) => {
     return next();
   }
   
-  // Manual CORS headers for specific routes if needed
-  const manualAllowedOrigins = [
-    'https://www.justbecho.com',
-    'https://justbecho.com',
-    'http://localhost:3000'
-  ];
-  
-  if (manualAllowedOrigins.includes(origin)) {
+  // Allow all justbecho and vercel domains
+  if (origin.includes('justbecho.com') || origin.includes('vercel.app') || origin.includes('localhost')) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
@@ -231,7 +240,7 @@ app.get("/api/test-cors", (req, res) => {
     },
     server: {
       name: 'JustBecho API',
-      version: '2.6.1',
+      version: '2.6.2',
       environment: process.env.NODE_ENV || 'development'
     }
   });
@@ -310,7 +319,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.6.1",
+    version: "2.6.2",
     cors: {
       status: "enabled",
       origin: origin,
@@ -340,7 +349,7 @@ app.use((req, res) => {
   
   // Set CORS headers even for 404
   const origin = req.headers.origin;
-  if (origin && origin.includes('justbecho.com') || origin && origin.includes('vercel.app')) {
+  if (origin && (origin.includes('justbecho.com') || origin.includes('vercel.app'))) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   
@@ -357,7 +366,7 @@ app.use((error, req, res, next) => {
   
   // Set CORS headers for errors
   const origin = req.headers.origin;
-  if (origin && origin.includes('justbecho.com') || origin && origin.includes('vercel.app')) {
+  if (origin && (origin.includes('justbecho.com') || origin.includes('vercel.app'))) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   
@@ -379,8 +388,8 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.6.1                  ║
-║                 🌐 CORS FIXED FOR www.justbecho.com          ║
+║                  🚀 JUST BECHO SERVER 2.6.2                  ║
+║                 🌐 CORS FIXED - NO WILDCARD ERROR            ║
 ║                 💳 RAZORPAY PAYMENT INTEGRATED               ║
 ╚══════════════════════════════════════════════════════════════╝
 
