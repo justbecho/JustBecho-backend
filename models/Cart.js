@@ -1,4 +1,3 @@
-// models/Cart.js - CORRECTED VERSION
 import mongoose from "mongoose";
 
 const cartItemSchema = new mongoose.Schema({
@@ -49,25 +48,14 @@ const cartSchema = new mongoose.Schema({
     unique: true
   },
   items: [cartItemSchema],
-  
-  // ✅ CORRECTED: subtotal should be ONLY product prices (without becho protect)
   subtotal: {
     type: Number,
     default: 0
   },
-  
-  // ✅ bechoProtectTotal should be separate
   bechoProtectTotal: {
     type: Number,
     default: 0
   },
-  
-  // ✅ totalAmount = subtotal + bechoProtectTotal (for display)
-  totalAmount: {
-    type: Number,
-    default: 0
-  },
-  
   totalItems: {
     type: Number,
     default: 0
@@ -76,45 +64,36 @@ const cartSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// ✅ CORRECTED calculation method
+// Calculate cart totals
 cartSchema.methods.calculateAndSave = async function() {
   let subtotal = 0;
   let bechoProtectTotal = 0;
   let totalItems = 0;
   
   this.items.forEach(item => {
-    // ✅ Item subtotal (product price × quantity)
     const itemSubtotal = item.price * item.quantity;
-    
-    // ✅ Becho Protect total for this item (if selected)
     const bechoProtectItemTotal = item.bechoProtect.selected 
       ? (item.bechoProtect.price || 0) * item.quantity 
       : 0;
     
-    // ✅ Item total price (product + becho protect)
     item.totalPrice = itemSubtotal + bechoProtectItemTotal;
-    
-    // ✅ Add to cart totals
-    subtotal += itemSubtotal; // ONLY product prices
-    bechoProtectTotal += bechoProtectItemTotal; // Becho protect separately
+    subtotal += itemSubtotal;
+    bechoProtectTotal += bechoProtectItemTotal;
     totalItems += item.quantity;
   });
   
-  // ✅ Update cart totals CORRECTLY
   this.subtotal = subtotal;
   this.bechoProtectTotal = bechoProtectTotal;
-  this.totalAmount = subtotal + bechoProtectTotal;
   this.totalItems = totalItems;
   
-  // Save the cart
   return await this.save();
 };
 
-// ✅ Helper method to get totals for checkout
+// Get checkout totals (hidden platform fee included in GST)
 cartSchema.methods.getCheckoutTotals = function() {
   const SHIPPING_CHARGE = 299;
   
-  // Platform fee calculation based on subtotal
+  // Platform fee calculation (hidden from user)
   let platformFeePercentage = 0;
   if (this.subtotal <= 2000) {
     platformFeePercentage = 30;
@@ -129,17 +108,18 @@ cartSchema.methods.getCheckoutTotals = function() {
   }
   
   const platformFee = Math.round((this.subtotal * platformFeePercentage) / 100);
-  const tax = Math.round(platformFee * 0.18); // GST on platform fee only
-  const grandTotal = this.subtotal + this.bechoProtectTotal + platformFee + tax + SHIPPING_CHARGE;
+  const gst = Math.round(platformFee * 0.18); // 18% GST on platform fee
+  const grandTotal = this.subtotal + this.bechoProtectTotal + gst + SHIPPING_CHARGE;
   
   return {
     subtotal: this.subtotal,
     bechoProtectTotal: this.bechoProtectTotal,
-    platformFee,
-    platformFeePercentage,
-    tax,
+    gst,
     shipping: SHIPPING_CHARGE,
-    grandTotal
+    grandTotal,
+    // Hidden values for calculation only
+    _platformFee: platformFee,
+    _platformFeePercentage: platformFeePercentage
   };
 };
 

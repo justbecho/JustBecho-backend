@@ -1,23 +1,31 @@
-// routes/cartRoutes.js - UPDATED WITH BECHO PROTECT ROUTES
-import express from "express";
-import {
-  getCart,
-  addToCart,
-  updateCartItem,
-  removeFromCart,
-  clearCart,
-  toggleBechoProtect // ✅ New function
-} from "../controllers/cartController.js";
-import authMiddleware from "../middleware/authMiddleware.js";
+import express from 'express';
+import { 
+  getCart, 
+  addToCart, 
+  updateCartItem, 
+  removeFromCart, 
+  clearCart, 
+  toggleBechoProtect,
+  getCheckoutTotals,
+  getCartBreakdown
+} from '../controllers/cartController.js';
+import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
-// ✅ CART ROUTES (All require authentication)
-router.get("/", authMiddleware, getCart);
-router.post("/add", authMiddleware, addToCart);
-router.put("/update/:itemId", authMiddleware, updateCartItem);
-router.delete("/remove/:itemId", authMiddleware, removeFromCart);
-router.delete("/clear", authMiddleware, clearCart);
-router.put("/item/:itemId/becho-protect", authMiddleware, toggleBechoProtect); // ✅ New route
+// Apply auth middleware to all routes
+router.use(auth);
+
+// Cart routes
+router.get('/', getCart);
+router.post('/add', addToCart);
+router.put('/update/:itemId', updateCartItem);
+router.delete('/remove/:itemId', removeFromCart);
+router.delete('/clear', clearCart);
+router.put('/item/:itemId/becho-protect', toggleBechoProtect);
+
+// New checkout totals routes
+router.get('/checkout-totals', getCheckoutTotals);
+router.get('/breakdown', getCartBreakdown); // For debugging
 
 export default router;

@@ -1,4 +1,4 @@
-// controllers/cartController.js - SIMPLIFIED WITH MODEL METHOD
+// controllers/cartController.js - UPDATED FOR HIDDEN PLATFORM FEE
 import Cart from "../models/Cart.js";
 import Product from "../models/Product.js";
 
@@ -16,10 +16,9 @@ export const getCart = async (req, res) => {
         success: true,
         cart: {
           items: [],
-          totalAmount: 0,
-          totalItems: 0,
           subtotal: 0,
-          bechoProtectTotal: 0
+          bechoProtectTotal: 0,
+          totalItems: 0
         }
       });
     }
@@ -38,7 +37,7 @@ export const getCart = async (req, res) => {
   }
 };
 
-// Add item to cart - SIMPLIFIED
+// Add item to cart
 export const addToCart = async (req, res) => {
   try {
     const { productId, quantity = 1, price, bechoProtectSelected = false, bechoProtectPrice = 0 } = req.body;
@@ -80,7 +79,6 @@ export const addToCart = async (req, res) => {
         items: [],
         subtotal: 0,
         bechoProtectTotal: 0,
-        totalAmount: 0,
         totalItems: 0
       });
     }
@@ -134,7 +132,7 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    // ✅ USE MODEL METHOD INSTEAD OF DUPLICATE CODE
+    // Calculate and save cart totals
     await cart.calculateAndSave();
 
     // Populate cart with product details
@@ -160,7 +158,7 @@ export const addToCart = async (req, res) => {
   }
 };
 
-// Update cart item quantity - SIMPLIFIED
+// Update cart item quantity
 export const updateCartItem = async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -201,7 +199,7 @@ export const updateCartItem = async (req, res) => {
 
     cart.items[itemIndex].quantity = quantity;
     
-    // ✅ USE MODEL METHOD
+    // Calculate and save cart totals
     await cart.calculateAndSave();
 
     // Populate cart
@@ -224,7 +222,7 @@ export const updateCartItem = async (req, res) => {
   }
 };
 
-// Remove item from cart - SIMPLIFIED
+// Remove item from cart
 export const removeFromCart = async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -240,7 +238,7 @@ export const removeFromCart = async (req, res) => {
 
     cart.items = cart.items.filter(item => item._id.toString() !== itemId);
     
-    // ✅ USE MODEL METHOD
+    // Calculate and save cart totals
     await cart.calculateAndSave();
 
     // Populate cart
@@ -263,7 +261,7 @@ export const removeFromCart = async (req, res) => {
   }
 };
 
-// Clear entire cart - SIMPLIFIED
+// Clear entire cart
 export const clearCart = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -278,7 +276,7 @@ export const clearCart = async (req, res) => {
 
     cart.items = [];
     
-    // ✅ USE MODEL METHOD (will reset all totals to 0)
+    // Calculate and save cart totals (will reset to 0)
     await cart.calculateAndSave();
 
     res.json({
@@ -296,7 +294,7 @@ export const clearCart = async (req, res) => {
   }
 };
 
-// Toggle Becho Protect for a cart item - SIMPLIFIED
+// Toggle Becho Protect for a cart item
 export const toggleBechoProtect = async (req, res) => {
   try {
     const { itemId } = req.params;
@@ -336,7 +334,7 @@ export const toggleBechoProtect = async (req, res) => {
       cart.items[itemIndex].bechoProtect.price = 0;
     }
     
-    // ✅ USE MODEL METHOD
+    // Calculate and save cart totals
     await cart.calculateAndSave();
 
     // Populate cart
@@ -359,7 +357,7 @@ export const toggleBechoProtect = async (req, res) => {
   }
 };
 
-// ✅ NEW: Get checkout totals (for frontend calculation verification)
+// ✅ Get checkout totals (with hidden platform fee)
 export const getCheckoutTotals = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -372,12 +370,18 @@ export const getCheckoutTotals = async (req, res) => {
       });
     }
 
-    // ✅ USE MODEL'S getCheckoutTotals METHOD
+    // Use Cart model's getCheckoutTotals method
     const checkoutTotals = cart.getCheckoutTotals();
 
     res.json({
       success: true,
-      totals: checkoutTotals,
+      totals: {
+        subtotal: checkoutTotals.subtotal,
+        bechoProtectTotal: checkoutTotals.bechoProtectTotal,
+        gst: checkoutTotals.gst,
+        shipping: checkoutTotals.shipping,
+        grandTotal: checkoutTotals.grandTotal
+      },
       cart: {
         subtotal: cart.subtotal,
         bechoProtectTotal: cart.bechoProtectTotal,
@@ -390,6 +394,61 @@ export const getCheckoutTotals = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while calculating checkout totals'
+    });
+  }
+};
+
+// ✅ Get cart totals breakdown (for debugging/admin)
+export const getCartBreakdown = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const cart = await Cart.findOne({ user: userId });
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cart not found'
+      });
+    }
+
+    // Use Cart model's getCheckoutTotals method
+    const checkoutTotals = cart.getCheckoutTotals();
+
+    // Detailed breakdown
+    const breakdown = {
+      items: cart.items.map(item => ({
+        product: item.product,
+        quantity: item.quantity,
+        price: item.price,
+        subtotal: item.price * item.quantity,
+        bechoProtect: item.bechoProtect,
+        bechoProtectTotal: item.bechoProtect.selected ? item.bechoProtect.price * item.quantity : 0
+      })),
+      totals: {
+        subtotal: cart.subtotal,
+        bechoProtectTotal: cart.bechoProtectTotal,
+        platformFee: checkoutTotals._platformFee,
+        platformFeePercentage: checkoutTotals._platformFeePercentage,
+        gst: checkoutTotals.gst,
+        shipping: checkoutTotals.shipping,
+        grandTotal: checkoutTotals.grandTotal
+      },
+      calculation: {
+        formula: "subtotal + bechoProtectTotal + gst + shipping = grandTotal",
+        note: "Platform fee is hidden from user but included in GST calculation"
+      }
+    };
+
+    res.json({
+      success: true,
+      breakdown: breakdown
+    });
+
+  } catch (error) {
+    console.error('❌ Get cart breakdown error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while getting cart breakdown'
     });
   }
 };
