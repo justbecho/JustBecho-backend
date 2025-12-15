@@ -96,6 +96,36 @@ const productSchema = new mongoose.Schema({
     default: ""
   },
   
+  // ✅ ADDED: Shipping Fields
+  shippingStatus: {
+    type: String,
+    enum: ['pending', 'ready', 'shipped', 'delivered'],
+    default: 'pending'
+  },
+  
+  shippedAt: {
+    type: Date
+  },
+  
+  deliveredAt: {
+    type: Date
+  },
+  
+  // ✅ ADDED: Sold tracking
+  soldTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
+  soldAt: {
+    type: Date
+  },
+  
+  order: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order'
+  },
+  
   // Additional Info
   purchaseYear: {
     type: Number,

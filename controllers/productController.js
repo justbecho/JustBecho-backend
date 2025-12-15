@@ -234,6 +234,7 @@ const createProduct = async (req, res) => {
       seller: user.userId,
       sellerName: seller.name || seller.email.split('@')[0],
       sellerUsername: seller.username || '',
+      shippingStatus: 'pending', // ✅ DEFAULT SHIPPING STATUS
       status: 'active',
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     };
@@ -258,7 +259,8 @@ const createProduct = async (req, res) => {
         finalPrice: savedProduct.finalPrice,
         images: savedProduct.images.map(img => img.url),
         sellerName: savedProduct.sellerName,
-        status: savedProduct.status
+        status: savedProduct.status,
+        shippingStatus: savedProduct.shippingStatus // ✅ INCLUDE SHIPPING STATUS
       }
     });
 
@@ -322,7 +324,7 @@ const getProductsByCategory = async (req, res) => {
       .sort(sortOption)
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition sellerName status');
+      .select('productName brand category finalPrice images views likes createdAt condition sellerName status shippingStatus soldAt shippedAt deliveredAt');
     
     const total = await Product.countDocuments(query);
     
@@ -403,7 +405,7 @@ const getAllProducts = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition status');
+      .select('productName brand category finalPrice images views likes createdAt condition status shippingStatus');
 
     const total = await Product.countDocuments(query);
 
@@ -426,7 +428,7 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ FIXED: GET USER PRODUCTS - SHOW ALL (ACTIVE + SOLD)
+// ✅ FIXED: GET USER PRODUCTS - SHOW ALL (ACTIVE + SOLD) WITH SHIPPING STATUS
 const getUserProducts = async (req, res) => {
   console.log('🔄 getUserProducts function called');
   
@@ -485,6 +487,12 @@ const getUserProducts = async (req, res) => {
         finalPrice: product.finalPrice,
         images: product.images || [],
         status: product.status || 'active',
+        
+        // ✅ ADDED: Shipping Information
+        shippingStatus: product.shippingStatus || 'pending',
+        shippedAt: product.shippedAt || null,
+        deliveredAt: product.deliveredAt || null,
+        
         seller: product.seller,
         sellerName: product.sellerName,
         sellerUsername: product.sellerUsername,
@@ -492,6 +500,7 @@ const getUserProducts = async (req, res) => {
         updatedAt: product.updatedAt,
         views: product.views || 0,
         likes: product.likes || 0,
+        
         // ✅ ADDED: Sold tracking
         soldTo: product.soldTo || null,
         soldAt: product.soldAt || null,
@@ -509,6 +518,141 @@ const getUserProducts = async (req, res) => {
       success: false,
       message: 'Server error: ' + error.message,
       error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// ✅ MARK PRODUCT AS SHIPPED
+const markProductAsShipped = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId || req.user.id;
+    const { shippingStatus, shippedAt } = req.body;
+
+    console.log(`🚚 Marking product ${id} as shipped by user ${userId}`);
+
+    // Find product
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Check if user owns the product
+    if (product.seller.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this product'
+      });
+    }
+
+    // Check if product is sold
+    if (product.status !== 'sold') {
+      return res.status(400).json({
+        success: false,
+        message: 'Product must be sold before shipping'
+      });
+    }
+
+    // Update shipping status
+    product.shippingStatus = shippingStatus || 'shipped';
+    product.shippedAt = shippedAt || new Date();
+    
+    await product.save();
+
+    console.log(`✅ Product ${id} marked as shipped successfully`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Product marked as shipped',
+      product: {
+        _id: product._id,
+        status: product.status,
+        shippingStatus: product.shippingStatus,
+        shippedAt: product.shippedAt,
+        deliveredAt: product.deliveredAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error marking product as shipped:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ✅ MARK PRODUCT AS DELIVERED
+const markProductAsDelivered = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId || req.user.id;
+    const { shippingStatus, deliveredAt } = req.body;
+
+    console.log(`📦 Marking product ${id} as delivered by user ${userId}`);
+
+    // Find product
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Check if user owns the product
+    if (product.seller.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this product'
+      });
+    }
+
+    // Check if product is sold and shipped
+    if (product.status !== 'sold') {
+      return res.status(400).json({
+        success: false,
+        message: 'Product must be sold before delivery'
+      });
+    }
+
+    if (product.shippingStatus !== 'shipped') {
+      return res.status(400).json({
+        success: false,
+        message: 'Product must be shipped before delivery'
+      });
+    }
+
+    // Update shipping status
+    product.shippingStatus = shippingStatus || 'delivered';
+    product.deliveredAt = deliveredAt || new Date();
+    
+    await product.save();
+
+    console.log(`✅ Product ${id} marked as delivered successfully`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Product marked as delivered',
+      product: {
+        _id: product._id,
+        status: product.status,
+        shippingStatus: product.shippingStatus,
+        shippedAt: product.shippedAt,
+        deliveredAt: product.deliveredAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error marking product as delivered:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 };
@@ -535,7 +679,7 @@ const getProductsByBrand = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition status');
+      .select('productName brand category finalPrice images views likes createdAt condition status shippingStatus');
 
     const total = await Product.countDocuments(query);
 
@@ -788,7 +932,7 @@ const getFeaturedProducts = async (req, res) => {
     })
       .sort({ views: -1, likes: -1 })
       .limit(8)
-      .select('productName brand finalPrice images views likes condition status');
+      .select('productName brand finalPrice images views likes condition status shippingStatus');
 
     res.status(200).json({
       success: true,
@@ -830,7 +974,7 @@ const searchProducts = async (req, res) => {
     const products = await Product.find(query)
       .sort({ createdAt: -1 })
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition status');
+      .select('productName brand category finalPrice images views likes createdAt condition status shippingStatus');
 
     res.status(200).json({
       success: true,
@@ -923,5 +1067,7 @@ export {
   getAllBrands,
   getFeaturedProducts,
   searchProducts,
-  testCloudinary
+  testCloudinary,
+  markProductAsShipped,      // ✅ ADDED: Shipping function
+  markProductAsDelivered     // ✅ ADDED: Delivery function
 };

@@ -11,7 +11,9 @@ import {
   getAllBrands,
   getFeaturedProducts,
   searchProducts,
-  testCloudinary
+  testCloudinary,
+  markProductAsShipped,      // ✅ ADDED: Shipping function
+  markProductAsDelivered     // ✅ ADDED: Delivery function
 } from "../controllers/productController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import uploadMiddleware from "../middleware/uploadMiddleware.js";
@@ -46,6 +48,10 @@ router.post("/",
   uploadMiddleware,
   createProduct
 );
+
+// ✅ SHIPPING ROUTES - ADDED
+router.put("/:id/ship", authMiddleware, markProductAsShipped);
+router.put("/:id/deliver", authMiddleware, markProductAsDelivered);
 
 // ✅ PUBLIC ROUTES (Keep at bottom)
 router.get("/", getAllProducts);
