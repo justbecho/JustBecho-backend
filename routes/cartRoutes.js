@@ -9,7 +9,7 @@ import {
   getCheckoutTotals,
   getCartBreakdown
 } from '../controllers/cartController.js';
-import auth from '../middleware/auth.js';
+import auth from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
