@@ -31,7 +31,7 @@ const userSchema = new mongoose.Schema({
   // ✅ UPDATED: ROLE SYSTEM WITH ADMIN
   role: {
     type: String,
-    enum: ['user', 'buyer', 'seller', 'influencer', 'admin'], // ✅ 'admin' ADDED
+    enum: ['user', 'buyer', 'seller', 'influencer', 'admin'],
     default: 'user'
   },
   
@@ -101,6 +101,26 @@ const userSchema = new mongoose.Schema({
     pincode: { type: String, default: "" }
   },
   
+  // ✅ ADDED: ORDER TRACKING FIELDS
+  orders: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order'
+  }],
+  totalOrders: {
+    type: Number,
+    default: 0
+  },
+  
+  // ✅ ADDED: FOR SELLERS - SOLD PRODUCTS
+  soldProducts: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  }],
+  totalSales: {
+    type: Number,
+    default: 0
+  },
+  
   isActive: {
     type: Boolean,
     default: true
@@ -121,5 +141,7 @@ userSchema.index({ username: 1 });
 userSchema.index({ sellerVerificationStatus: 1 });
 userSchema.index({ verificationId: 1 });
 userSchema.index({ 'bankDetails.accountNumber': 1 });
+userSchema.index({ orders: 1 });
+userSchema.index({ soldProducts: 1 });
 
 export default mongoose.model("User", userSchema);

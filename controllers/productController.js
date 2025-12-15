@@ -295,10 +295,9 @@ const getProductsByCategory = async (req, res) => {
     const mappedCategory = strictCategoryMapping(category);
     console.log(`Mapped category: "${category}" → "${mappedCategory}"`);
     
-    // ✅ IMPORTANT: Use EXACT case-insensitive match
-    // This ensures "MEN'S FASHION" doesn't match "WOMEN'S FASHION"
+    // ✅ IMPORTANT: Use EXACT case-insensitive match with ACTIVE status only
     let query = { 
-      status: 'active',
+      status: 'active', // ✅ ONLY SHOW ACTIVE PRODUCTS
       category: { $regex: new RegExp(`^${mappedCategory}$`, 'i') }
     };
     
@@ -323,7 +322,7 @@ const getProductsByCategory = async (req, res) => {
       .sort(sortOption)
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition sellerName');
+      .select('productName brand category finalPrice images views likes createdAt condition sellerName status');
     
     const total = await Product.countDocuments(query);
     
@@ -367,7 +366,7 @@ const getProductsByCategory = async (req, res) => {
   }
 };
 
-// ✅ GET ALL PRODUCTS
+// ✅ GET ALL PRODUCTS - ONLY ACTIVE
 const getAllProducts = async (req, res) => {
   try {
     const { 
@@ -378,6 +377,7 @@ const getAllProducts = async (req, res) => {
       search 
     } = req.query;
     
+    // ✅ ONLY ACTIVE PRODUCTS
     let query = { status: 'active' };
     
     if (category && category !== 'all') {
@@ -403,7 +403,7 @@ const getAllProducts = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
+      .select('productName brand category finalPrice images views likes createdAt condition status');
 
     const total = await Product.countDocuments(query);
 
@@ -426,7 +426,7 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// ✅ FIXED: GET USER PRODUCTS - COMPLETE WORKING VERSION
+// ✅ FIXED: GET USER PRODUCTS - SHOW ALL (ACTIVE + SOLD)
 const getUserProducts = async (req, res) => {
   console.log('🔄 getUserProducts function called');
   
@@ -444,15 +444,9 @@ const getUserProducts = async (req, res) => {
     console.log('🔑 Available keys in req.user:', Object.keys(req.user));
     
     // Step 2: Try ALL possible user ID properties
-    // ✅ IMPORTANT: Your authMiddleware sets userId, not id
     const userId = req.user.userId || req.user.id || req.user._id;
     
     console.log('🆔 User ID extracted:', userId);
-    console.log('🔍 Extraction details:', {
-      'req.user.userId': req.user.userId,
-      'req.user.id': req.user.id,
-      'req.user._id': req.user._id
-    });
     
     if (!userId) {
       console.log('❌ ERROR: No user ID found');
@@ -468,7 +462,7 @@ const getUserProducts = async (req, res) => {
     
     console.log(`🔍 Querying database for seller: ${userId}`);
     
-    // Step 3: Query database
+    // Step 3: Query database - SHOW ALL PRODUCTS (ACTIVE + SOLD)
     const products = await Product.find({ seller: userId })
       .sort({ createdAt: -1 })
       .lean();
@@ -497,7 +491,11 @@ const getUserProducts = async (req, res) => {
         createdAt: product.createdAt,
         updatedAt: product.updatedAt,
         views: product.views || 0,
-        likes: product.likes || 0
+        likes: product.likes || 0,
+        // ✅ ADDED: Sold tracking
+        soldTo: product.soldTo || null,
+        soldAt: product.soldAt || null,
+        order: product.order || null
       }))
     };
     
@@ -515,14 +513,14 @@ const getUserProducts = async (req, res) => {
   }
 };
 
-// ✅ GET PRODUCTS BY BRAND
+// ✅ GET PRODUCTS BY BRAND - ONLY ACTIVE
 const getProductsByBrand = async (req, res) => {
   try {
     const { brand } = req.params;
     const { category, page = 1, limit = 20 } = req.query;
     
     let query = { 
-      status: 'active',
+      status: 'active', // ✅ ONLY ACTIVE
       brand: { $regex: new RegExp(`^${brand}$`, 'i') }
     };
     
@@ -537,7 +535,7 @@ const getProductsByBrand = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
+      .select('productName brand category finalPrice images views likes createdAt condition status');
 
     const total = await Product.countDocuments(query);
 
@@ -562,7 +560,7 @@ const getProductsByBrand = async (req, res) => {
   }
 };
 
-// ✅ GET ALL BRANDS
+// ✅ GET ALL BRANDS - ONLY ACTIVE
 const getAllBrands = async (req, res) => {
   try {
     const brands = await Product.distinct('brand', { status: 'active' });
@@ -571,7 +569,7 @@ const getAllBrands = async (req, res) => {
       brands.map(async (brand) => {
         const count = await Product.countDocuments({ 
           brand: { $regex: new RegExp(`^${brand}$`, 'i') },
-          status: 'active'
+          status: 'active' // ✅ ONLY ACTIVE
         });
         return {
           name: brand,
@@ -612,11 +610,14 @@ const getProduct = async (req, res) => {
       });
     }
 
-    product.views += 1;
-    await product.save();
+    // Only increment views for active products
+    if (product.status === 'active') {
+      product.views += 1;
+      await product.save();
+    }
 
     const seller = await User.findById(product.seller)
-      .select('name email username phone instaId sellerVerified');
+      .select('name email username phone instaId sellerVerified totalSales');
 
     const productWithSeller = {
       ...product.toObject(),
@@ -626,7 +627,8 @@ const getProduct = async (req, res) => {
         username: seller.username,
         phone: seller.phone,
         instaId: seller.instaId,
-        sellerVerified: seller.sellerVerified
+        sellerVerified: seller.sellerVerified,
+        totalSales: seller.totalSales || 0
       } : null
     };
 
@@ -778,15 +780,15 @@ const deleteProduct = async (req, res) => {
   }
 };
 
-// ✅ GET FEATURED PRODUCTS
+// ✅ GET FEATURED PRODUCTS - ONLY ACTIVE
 const getFeaturedProducts = async (req, res) => {
   try {
     const products = await Product.find({ 
-      status: 'active'
+      status: 'active' // ✅ ONLY ACTIVE
     })
       .sort({ views: -1, likes: -1 })
       .limit(8)
-      .select('productName brand finalPrice images views likes condition');
+      .select('productName brand finalPrice images views likes condition status');
 
     res.status(200).json({
       success: true,
@@ -801,12 +803,12 @@ const getFeaturedProducts = async (req, res) => {
   }
 };
 
-// ✅ SEARCH PRODUCTS
+// ✅ SEARCH PRODUCTS - ONLY ACTIVE
 const searchProducts = async (req, res) => {
   try {
     const { q, brand, category, limit = 20 } = req.query;
     
-    let query = { status: 'active' };
+    let query = { status: 'active' }; // ✅ ONLY ACTIVE
     
     if (brand && brand !== 'all') {
       query.brand = { $regex: new RegExp(brand, 'i') };
@@ -828,7 +830,7 @@ const searchProducts = async (req, res) => {
     const products = await Product.find(query)
       .sort({ createdAt: -1 })
       .limit(Number(limit))
-      .select('productName brand category finalPrice images views likes createdAt condition');
+      .select('productName brand category finalPrice images views likes createdAt condition status');
 
     res.status(200).json({
       success: true,

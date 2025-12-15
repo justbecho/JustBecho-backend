@@ -59,7 +59,8 @@ const connectDB = async () => {
 import './models/User.js';
 import './models/Product.js';
 import './models/Cart.js';
-import './models/Order.js'; // ✅ NEW: Order model
+import './models/Order.js';
+import './models/Wishlist.js';
 
 // ✅ IMPORT ROUTES
 import authRoutes from "./routes/authRoutes.js";
@@ -69,14 +70,11 @@ import cartRoutes from "./routes/cartRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
-import razorpayOrderRoutes from "./routes/razorpayOrder.js"; // ✅ NEW
-import razorpayVerifyRoutes from "./routes/razorpayVerify.js"; // ✅ NEW
+import razorpayOrderRoutes from "./routes/razorpayOrder.js";
+import razorpayVerifyRoutes from "./routes/razorpayVerify.js";
+import orderRoutes from "./routes/orderRoutes.js"; // ✅ NEW: Order routes
 
 const app = express();
-
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-// ✅ ULTRA SIMPLE CORS - NO WILDCARD ERRORS
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
 
 // ✅ SIMPLE CORS Configuration
 const corsOptions = {
@@ -157,14 +155,11 @@ app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/api/razorpay", razorpayOrderRoutes); // ✅ NEW: Razorpay routes
-app.use("/api/razorpay", razorpayVerifyRoutes); // ✅ NEW: Payment verification
+app.use("/api/razorpay", razorpayOrderRoutes);
+app.use("/api/razorpay", razorpayVerifyRoutes);
+app.use("/api/orders", orderRoutes); // ✅ NEW: Orders routes
 
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
 // ✅ RAZORPAY DEBUG ENDPOINTS
-// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
-
-// ✅ RAZORPAY DEBUG - Check if keys are loaded
 app.get("/api/razorpay/debug", (req, res) => {
   const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
   const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
@@ -184,7 +179,7 @@ app.get("/api/razorpay/debug", (req, res) => {
     },
     server: {
       name: 'JustBecho API',
-      version: '2.6.4'
+      version: '2.7.0'
     }
   });
 });
@@ -312,7 +307,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.6.4",
+    version: "2.7.0",
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -322,6 +317,7 @@ app.get("/", (req, res) => {
       cart: "/api/cart",
       admin: "/api/admin",
       razorpay: "/api/razorpay",
+      orders: "/api/orders", // ✅ NEW
       health: "/api/health",
       testDb: "/api/test-db",
       razorpayDebug: "/api/razorpay/debug",
@@ -361,8 +357,8 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.6.4                  ║
-║                🌐 SIMPLE CORS - NO WILDCARD                  ║
+║                  🚀 JUST BECHO SERVER 2.7.0                  ║
+║                   📦 ORDER TRACKING ENABLED                  ║
 ║                 💳 RAZORPAY WITH DEBUG ENDPOINTS             ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -379,6 +375,12 @@ const startServer = async () => {
   ✅ https://just-becho-frontend.vercel.app
   ✅ http://localhost:3000
 
+📦 ORDER SYSTEM FEATURES:
+  ✅ Buyer order tracking
+  ✅ Seller sold products tracking
+  ✅ Product status: active → sold
+  ✅ Category filtering of sold products
+
 🔧 DEBUG ENDPOINTS:
   ✅ /api/razorpay/debug - Check Razorpay keys
   ✅ /api/razorpay/test-order - Test Razorpay API
@@ -394,6 +396,7 @@ const startServer = async () => {
   🛒  Cart:        http://localhost:${PORT}/api/cart
   👑 Admin:       http://localhost:${PORT}/api/admin
   💳 Razorpay:   http://localhost:${PORT}/api/razorpay
+  📦 Orders:     http://localhost:${PORT}/api/orders
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.

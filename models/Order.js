@@ -1,3 +1,4 @@
+// models/Order.js - UPDATE
 import mongoose from 'mongoose';
 
 const orderSchema = new mongoose.Schema({
@@ -45,6 +46,19 @@ const orderSchema = new mongoose.Schema({
       selected: Boolean,
       price: Number
     }
+  }],
+  // ✅ ADD THESE FIELDS FOR TRACKING
+  buyer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  seller: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  products: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
   }],
   paidAt: {
     type: Date
