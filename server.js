@@ -160,16 +160,123 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/razorpay", razorpayOrderRoutes); // ✅ NEW: Razorpay routes
 app.use("/api/razorpay", razorpayVerifyRoutes); // ✅ NEW: Payment verification
 
+// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+// ✅ RAZORPAY DEBUG ENDPOINTS
+// ✅ ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+
+// ✅ RAZORPAY DEBUG - Check if keys are loaded
+app.get("/api/razorpay/debug", (req, res) => {
+  const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
+  const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
+  
+  console.log('🔐 Razorpay Debug Request');
+  console.log('   Key ID exists:', !!keyId);
+  console.log('   Key Secret exists:', !!keySecret);
+  
+  res.json({
+    success: true,
+    razorpay: {
+      keyIdExists: !!keyId,
+      keySecretExists: !!keySecret,
+      keyIdPrefix: keyId ? keyId.substring(0, 10) + '...' : 'none',
+      environment: process.env.NODE_ENV || 'development',
+      timestamp: new Date().toISOString()
+    },
+    server: {
+      name: 'JustBecho API',
+      version: '2.6.4'
+    }
+  });
+});
+
+// ✅ RAZORPAY TEST ORDER (for debugging - No auth required)
+app.post("/api/razorpay/test-order", async (req, res) => {
+  try {
+    console.log('🧪 Razorpay Test Order Request');
+    
+    // Dynamic import for Razorpay
+    const Razorpay = (await import('razorpay')).default;
+    
+    const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
+    const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
+    
+    console.log('🔐 Test Order - Keys Check:', {
+      keyId: keyId ? 'Present' : 'Missing',
+      keySecret: keySecret ? 'Present' : 'Missing'
+    });
+    
+    if (!keyId || !keySecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'Razorpay keys missing in environment',
+        keys: {
+          RAZORPAY_LIVE_KEY_ID: !!keyId,
+          RAZORPAY_LIVE_SECRET_KEY: !!keySecret
+        }
+      });
+    }
+    
+    const razorpay = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret
+    });
+    
+    console.log('📦 Creating test Razorpay order...');
+    
+    const testOrder = await razorpay.orders.create({
+      amount: 100, // ₹1 test (100 paise)
+      currency: 'INR',
+      receipt: `test_${Date.now()}`,
+      payment_capture: 1
+    });
+    
+    console.log('✅ Test Razorpay order created:', testOrder.id);
+    
+    res.json({
+      success: true,
+      message: 'Razorpay test successful',
+      order: {
+        id: testOrder.id,
+        amount: testOrder.amount,
+        currency: testOrder.currency,
+        receipt: testOrder.receipt,
+        status: testOrder.status
+      }
+    });
+  } catch (error) {
+    console.error('❌ Razorpay test error:', error.message);
+    console.error('Error details:', error.error || error);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Razorpay test failed: ' + error.message,
+      error: process.env.NODE_ENV === 'development' ? {
+        message: error.message,
+        code: error.code,
+        details: error.error
+      } : undefined
+    });
+  }
+});
+
 // ✅ Health check endpoint
 app.get("/api/health", (req, res) => {
+  const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
+  const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
+  
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     services: {
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      razorpay: !!process.env.RAZORPAY_LIVE_KEY_ID ? 'configured' : 'not configured',
-      cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
+      razorpay: {
+        configured: !!keyId && !!keySecret,
+        keyIdPresent: !!keyId,
+        keySecretPresent: !!keySecret
+      },
+      cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
+      cors: 'enabled'
     }
   });
 });
@@ -189,7 +296,8 @@ app.get("/api/test-db", async (req, res) => {
     res.json({
       success: true,
       database: states[dbState] || 'unknown',
-      readyState: dbState
+      readyState: dbState,
+      connection: mongoose.connection.host || 'unknown'
     });
   } catch (error) {
     res.json({
@@ -204,7 +312,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.6.3",
+    version: "2.6.4",
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -215,7 +323,9 @@ app.get("/", (req, res) => {
       admin: "/api/admin",
       razorpay: "/api/razorpay",
       health: "/api/health",
-      testDb: "/api/test-db"
+      testDb: "/api/test-db",
+      razorpayDebug: "/api/razorpay/debug",
+      razorpayTest: "/api/razorpay/test-order (POST)"
     }
   });
 });
@@ -236,7 +346,8 @@ app.use((error, req, res, next) => {
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
 
@@ -250,22 +361,29 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.6.3                  ║
+║                  🚀 JUST BECHO SERVER 2.6.4                  ║
 ║                🌐 SIMPLE CORS - NO WILDCARD                  ║
-║                 💳 RAZORPAY PAYMENT INTEGRATED               ║
+║                 💳 RAZORPAY WITH DEBUG ENDPOINTS             ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
   ✅ Environment: ${process.env.NODE_ENV || 'development'}
   ✅ Database: Connected
-  ✅ CORS: Enabled (Simple Configuration)
+  ✅ CORS: Enabled
+  ✅ Razorpay Keys: ${process.env.RAZORPAY_LIVE_KEY_ID ? '✅ Loaded' : '❌ Missing'}
 
 🌐 CORS ALLOWED DOMAINS:
   ✅ https://www.justbecho.com
   ✅ https://justbecho.com
   ✅ https://just-becho-frontend.vercel.app
   ✅ http://localhost:3000
+
+🔧 DEBUG ENDPOINTS:
+  ✅ /api/razorpay/debug - Check Razorpay keys
+  ✅ /api/razorpay/test-order - Test Razorpay API
+  ✅ /api/health - Health check
+  ✅ /api/test-db - Database test
 
 📡 AVAILABLE API ENDPOINTS:
   🔐 Auth:        http://localhost:${PORT}/api/auth
