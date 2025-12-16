@@ -91,7 +91,7 @@ cartSchema.methods.calculateAndSave = async function() {
 
 // Get checkout totals (hidden platform fee included in GST)
 cartSchema.methods.getCheckoutTotals = function() {
-  const SHIPPING_CHARGE = 299;
+  const SHIPPING_CHARGE = 1;
   
   // Platform fee calculation (hidden from user)
   let platformFeePercentage = 0;
