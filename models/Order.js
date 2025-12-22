@@ -1,3 +1,4 @@
+// models/Order.js - SIMPLIFIED VERSION (NO MIDDLEWARE)
 import mongoose from 'mongoose';
 
 const orderSchema = new mongoose.Schema({
@@ -30,7 +31,7 @@ const orderSchema = new mongoose.Schema({
     sparse: true
   },
   
-  // ✅ Order Status (FIXED: added 'processing' status)
+  // ✅ Order Status
   status: {
     type: String,
     enum: ['pending', 'paid', 'failed', 'shipped', 'delivered', 'cancelled', 'payment_pending', 'processing'],
@@ -98,7 +99,7 @@ const orderSchema = new mongoose.Schema({
   deliveredAt: Date,
   failedAt: Date,
   
-  // ✅ NimbusPost Shipments (FIXED: added 'pending' status)
+  // ✅ NimbusPost Shipments
   nimbuspostShipments: [{
     productId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -127,7 +128,7 @@ const orderSchema = new mongoose.Schema({
     }
   }],
   
-  // ✅ Shipping Legs (FIXED: removed 'picked_up' from enum)
+  // ✅ Shipping Legs
   shippingLegs: [{
     leg: {
       type: String,
@@ -135,7 +136,7 @@ const orderSchema = new mongoose.Schema({
     },
     status: {
       type: String,
-      enum: ['pending', 'in_transit', 'completed', 'failed'], // ✅ REMOVED 'pending_pickup' and 'picked_up'
+      enum: ['pending', 'in_transit', 'completed', 'failed'],
       default: 'pending'
     },
     awbNumbers: [String],
@@ -146,7 +147,10 @@ const orderSchema = new mongoose.Schema({
   
   // ✅ Order Metadata
   metadata: {
-    cartItemsCount: Number,
+    cartItemsCount: {
+      type: Number,
+      default: 0
+    },
     bechoProtectApplied: {
       type: Boolean,
       default: false
@@ -179,50 +183,7 @@ const orderSchema = new mongoose.Schema({
   minimize: false
 });
 
-// ✅ Pre-save hook (FIXED: proper function with next parameter)
-orderSchema.pre('save', function(next) {
-  try {
-    // Auto-set buyer if not set
-    if (!this.buyer && this.user) {
-      this.buyer = this.user;
-    }
-    
-    // Auto-calculate totalPrice for items
-    if (this.items && this.items.length > 0) {
-      this.items.forEach(item => {
-        if (!item.totalPrice) {
-          item.totalPrice = (item.price || 0) * (item.quantity || 1);
-        }
-      });
-    }
-    
-    // Set default status
-    if (!this.status) {
-      this.status = 'pending';
-    }
-    
-    // Initialize metadata if not set
-    if (!this.metadata) {
-      this.metadata = {};
-    }
-    
-    if (!this.metadata.cartItemsCount && this.items) {
-      this.metadata.cartItemsCount = this.items.length;
-    }
-    
-    // Check if any item has bechoProtect
-    if (this.items && this.items.length > 0) {
-      const hasBechoProtect = this.items.some(item => 
-        item.bechoProtect && item.bechoProtect.selected === true
-      );
-      this.metadata.bechoProtectApplied = hasBechoProtect;
-    }
-    
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
+// ✅ NO PRE-SAVE HOOKS - Complete remove all middleware
 
 // Indexes for better performance
 orderSchema.index({ user: 1, createdAt: -1 });
@@ -240,23 +201,6 @@ orderSchema.virtual('itemsCount').get(function() {
 // Virtual for formatted amount
 orderSchema.virtual('formattedAmount').get(function() {
   return `₹${this.totalAmount?.toLocaleString('en-IN') || '0'}`;
-});
-
-// Virtual for shipping status
-orderSchema.virtual('shippingStatusText').get(function() {
-  if (!this.shippingLegs || this.shippingLegs.length === 0) {
-    return 'Not Shipped';
-  }
-  
-  const lastLeg = this.shippingLegs[this.shippingLegs.length - 1];
-  const statusMap = {
-    pending: 'Pending Pickup',
-    in_transit: 'In Transit',
-    completed: 'Delivered',
-    failed: 'Shipping Failed'
-  };
-  
-  return statusMap[lastLeg.status] || lastLeg.status;
 });
 
 // Ensure virtuals are included in JSON
