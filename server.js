@@ -1,3 +1,4 @@
+// server.js - COMPLETE UPDATED VERSION
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -55,12 +56,13 @@ const connectDB = async () => {
   }
 };
 
-// ✅ IMPORT MODELS
+// ✅ IMPORT MODELS (IMPORTANT: Do this BEFORE importing routes)
 import './models/User.js';
 import './models/Product.js';
 import './models/Cart.js';
 import './models/Order.js';
 import './models/Wishlist.js';
+import './models/Category.js';
 
 // ✅ IMPORT ROUTES
 import authRoutes from "./routes/authRoutes.js";
@@ -72,7 +74,9 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import razorpayOrderRoutes from "./routes/razorpayOrder.js";
 import razorpayVerifyRoutes from "./routes/razorpayVerify.js";
-import orderRoutes from "./routes/orderRoutes.js"; // ✅ NEW: Order routes
+import orderRoutes from "./routes/orderRoutes.js";
+import nimbuspostTestRoutes from "./routes/nimbuspostTest.js";
+import shippingRoutes from "./routes/shippingRoutes.js"; // ✅ NEW: Shipping routes
 
 const app = express();
 
@@ -86,11 +90,12 @@ const corsOptions = {
     'https://justbecho.vercel.app',
     'https://just-becho.vercel.app',
     'http://localhost:3000',
-    'http://localhost:3001'
+    'http://localhost:3001',
+    'http://localhost:5173'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Auth-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token']
 };
 
 // Apply CORS middleware
@@ -106,7 +111,9 @@ app.use((req, res, next) => {
     'https://www.justbecho.com',
     'https://justbecho.com',
     'https://just-becho-frontend.vercel.app',
-    'http://localhost:3000'
+    'https://justbecho-frontend.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173'
   ];
   
   if (origin && allowedOrigins.includes(origin)) {
@@ -117,7 +124,7 @@ app.use((req, res, next) => {
   
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Auth-Token');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Auth-Token');
   
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
@@ -157,12 +164,16 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/razorpay", razorpayOrderRoutes);
 app.use("/api/razorpay", razorpayVerifyRoutes);
-app.use("/api/orders", orderRoutes); // ✅ NEW: Orders routes
+app.use("/api/orders", orderRoutes);
+app.use("/api/shipping", shippingRoutes); // ✅ ADDED: Shipping routes
+app.use("/api/nimbuspost", nimbuspostTestRoutes); // ✅ ADDED: NimbusPost test routes
 
 // ✅ RAZORPAY DEBUG ENDPOINTS
 app.get("/api/razorpay/debug", (req, res) => {
   const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
   const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
+  const nimbusEmail = process.env.NIMBUSPOST_EMAIL;
+  const nimbusPassword = process.env.NIMBUSPOST_PASSWORD;
   
   console.log('🔐 Razorpay Debug Request');
   console.log('   Key ID exists:', !!keyId);
@@ -177,9 +188,15 @@ app.get("/api/razorpay/debug", (req, res) => {
       environment: process.env.NODE_ENV || 'development',
       timestamp: new Date().toISOString()
     },
+    nimbuspost: {
+      emailExists: !!nimbusEmail,
+      passwordExists: !!nimbusPassword,
+      apiKeyExists: !!process.env.NIMBUSPOST_API_KEY
+    },
     server: {
       name: 'JustBecho API',
-      version: '2.7.0'
+      version: '3.0.0',
+      features: ['NimbusPost B2B Shipping', 'Two-Leg Logistics', 'Order Tracking']
     }
   });
 });
@@ -254,10 +271,35 @@ app.post("/api/razorpay/test-order", async (req, res) => {
   }
 });
 
+// ✅ NIMBUSPOST CONFIGURATION CHECK
+app.get("/api/nimbuspost/config", (req, res) => {
+  const email = process.env.NIMBUSPOST_EMAIL;
+  const password = process.env.NIMBUSPOST_PASSWORD;
+  const apiKey = process.env.NIMBUSPOST_API_KEY;
+  
+  res.json({
+    success: true,
+    config: {
+      emailExists: !!email,
+      passwordExists: !!password,
+      apiKeyExists: !!apiKey,
+      emailPreview: email ? email.substring(0, 3) + '***' + email.substring(email.indexOf('@')) : 'Not set',
+      apiKeyPreview: apiKey ? apiKey.substring(0, 10) + '...' : 'Not set'
+    },
+    instructions: [
+      'Set NIMBUSPOST_EMAIL, NIMBUSPOST_PASSWORD, and NIMBUSPOST_API_KEY in .env',
+      'Test connection: GET /api/nimbuspost/test',
+      'Create test shipment: POST /api/nimbuspost/test-shipment'
+    ]
+  });
+});
+
 // ✅ Health check endpoint
 app.get("/api/health", (req, res) => {
   const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
   const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
+  const nimbusEmail = process.env.NIMBUSPOST_EMAIL;
+  const nimbusPassword = process.env.NIMBUSPOST_PASSWORD;
   
   res.json({ 
     status: 'healthy',
@@ -270,9 +312,21 @@ app.get("/api/health", (req, res) => {
         keyIdPresent: !!keyId,
         keySecretPresent: !!keySecret
       },
+      nimbuspost: {
+        configured: !!nimbusEmail && !!nimbusPassword,
+        emailPresent: !!nimbusEmail,
+        passwordPresent: !!nimbusPassword
+      },
       cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
       cors: 'enabled'
-    }
+    },
+    features: [
+      'NimbusPost B2B Shipping Integration',
+      'Two-Leg Logistics (Seller→Warehouse→Buyer)',
+      'Razorpay Payment Gateway',
+      'Order Tracking & Management',
+      'Seller & Buyer Dashboards'
+    ]
   });
 });
 
@@ -292,7 +346,8 @@ app.get("/api/test-db", async (req, res) => {
       success: true,
       database: states[dbState] || 'unknown',
       readyState: dbState,
-      connection: mongoose.connection.host || 'unknown'
+      connection: mongoose.connection.host || 'unknown',
+      databaseName: mongoose.connection.name || 'unknown'
     });
   } catch (error) {
     res.json({
@@ -302,12 +357,70 @@ app.get("/api/test-db", async (req, res) => {
   }
 });
 
+// ✅ TEST NIMBUSPOST DIRECT TOKEN
+app.get("/api/test-nimbus-token", async (req, res) => {
+  try {
+    const token = process.env.NIMBUSPOST_API_KEY;
+    
+    if (!token) {
+      return res.json({
+        success: false,
+        message: 'NimbusPost API Key not found in .env file',
+        suggestion: 'Add NIMBUSPOST_API_KEY to your .env file'
+      });
+    }
+    
+    // Try a simple API call to test the token
+    const axios = (await import('axios')).default;
+    
+    const testResponse = await axios.get(
+      'https://ship.nimbuspost.com/api/shipmentcargo/wallet_balance',
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'x-api-key': token
+        }
+      }
+    );
+    
+    res.json({
+      success: true,
+      message: '✅ NimbusPost API Key is working!',
+      tokenPreview: token.substring(0, 30) + '...',
+      walletBalance: testResponse.data.data,
+      status: testResponse.data.status
+    });
+    
+  } catch (error) {
+    res.json({
+      success: false,
+      message: '❌ NimbusPost API Key test failed',
+      error: error.response?.data?.message || error.message,
+      tokenLength: process.env.NIMBUSPOST_API_KEY?.length || 0,
+      troubleshooting: [
+        'Check if API key is correct',
+        'Check if API key has proper permissions',
+        'Verify internet connection',
+        'Check NimbusPost dashboard for API status'
+      ]
+    });
+  }
+});
+
 // ✅ API Documentation endpoint
 app.get("/", (req, res) => {
   res.json({ 
-    message: "Just Becho API is running",
+    message: "🚀 Just Becho API is running",
     timestamp: new Date().toISOString(),
-    version: "2.7.0",
+    version: "3.0.0",
+    features: [
+      "NimbusPost B2B Shipping Integration",
+      "Two-Leg Logistics (Seller→Warehouse→Buyer)",
+      "Razorpay Payment Processing",
+      "Order & Shipment Tracking",
+      "Seller & Buyer Dashboards"
+    ],
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
@@ -317,11 +430,19 @@ app.get("/", (req, res) => {
       cart: "/api/cart",
       admin: "/api/admin",
       razorpay: "/api/razorpay",
-      orders: "/api/orders", // ✅ NEW
+      orders: "/api/orders",
+      shipping: "/api/shipping", // ✅ NEW
+      nimbuspost: "/api/nimbuspost", // ✅ NEW
       health: "/api/health",
       testDb: "/api/test-db",
       razorpayDebug: "/api/razorpay/debug",
-      razorpayTest: "/api/razorpay/test-order (POST)"
+      razorpayTest: "/api/razorpay/test-order (POST)",
+      nimbusConfig: "/api/nimbuspost/config",
+      nimbusTokenTest: "/api/test-nimbus-token"
+    },
+    important: {
+      nimbuspost: "Use B2B API Document from NimbusPost dashboard",
+      shippingFlow: "Payment → Create Shipment → Track → Update Status"
     }
   });
 });
@@ -332,18 +453,32 @@ app.use((req, res) => {
   res.status(404).json({ 
     success: false,
     message: `Route ${req.method} ${req.url} not found`,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    availableEndpoints: [
+      '/api/auth',
+      '/api/products', 
+      '/api/cart',
+      '/api/orders',
+      '/api/shipping',
+      '/api/razorpay',
+      '/api/nimbuspost'
+    ]
   });
 });
 
 // ✅ Global error handler
 app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
+  console.error('Error stack:', error.stack);
+  
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error',
     timestamp: new Date().toISOString(),
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    ...(process.env.NODE_ENV === 'development' && { 
+      stack: error.stack,
+      details: error 
+    })
   });
 });
 
@@ -357,9 +492,9 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 2.7.0                  ║
-║                   📦 ORDER TRACKING ENABLED                  ║
-║                 💳 RAZORPAY WITH DEBUG ENDPOINTS             ║
+║                  🚀 JUST BECHO SERVER 3.0.0                  ║
+║                📦 NIMBUSPOST SHIPPING ENABLED                ║
+║                🔄 TWO-LEG LOGISTICS (S→W→B)                  ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
@@ -367,36 +502,55 @@ const startServer = async () => {
   ✅ Environment: ${process.env.NODE_ENV || 'development'}
   ✅ Database: Connected
   ✅ CORS: Enabled
-  ✅ Razorpay Keys: ${process.env.RAZORPAY_LIVE_KEY_ID ? '✅ Loaded' : '❌ Missing'}
+  ✅ Razorpay: ${process.env.RAZORPAY_LIVE_KEY_ID ? '✅ Loaded' : '❌ Missing'}
+  ✅ NimbusPost: ${process.env.NIMBUSPOST_EMAIL ? '✅ Configured' : '❌ Not Configured'}
 
 🌐 CORS ALLOWED DOMAINS:
   ✅ https://www.justbecho.com
   ✅ https://justbecho.com
   ✅ https://just-becho-frontend.vercel.app
   ✅ http://localhost:3000
+  ✅ http://localhost:5173
 
-📦 ORDER SYSTEM FEATURES:
-  ✅ Buyer order tracking
-  ✅ Seller sold products tracking
-  ✅ Product status: active → sold
-  ✅ Category filtering of sold products
+📦 NIMBUSPOST SHIPPING FLOW:
+  ┌─────────────────────────────────────────────────────┐
+  │ 1. Buyer Payment → Razorpay                         │
+  │ 2. Verify Payment → Create NimbusPost Shipment      │
+  │ 3. Seller Pickup Scheduled → Label Generated        │
+  │ 4. Shipment Tracking → Two-Leg Updates              │
+  │ 5. Delivery Completed → Mark Order Delivered        │
+  └─────────────────────────────────────────────────────┘
 
-🔧 DEBUG ENDPOINTS:
+🔧 DEBUG & TEST ENDPOINTS:
   ✅ /api/razorpay/debug - Check Razorpay keys
-  ✅ /api/razorpay/test-order - Test Razorpay API
+  ✅ /api/test-nimbus-token - Test NimbusPost API Key
+  ✅ /api/nimbuspost/config - Check NimbusPost config
   ✅ /api/health - Health check
   ✅ /api/test-db - Database test
 
 📡 AVAILABLE API ENDPOINTS:
-  🔐 Auth:        http://localhost:${PORT}/api/auth
-  🛍️  Products:    http://localhost:${PORT}/api/products
-  ❤️  Wishlist:    http://localhost:${PORT}/api/wishlist
-  👤 Users:       http://localhost:${PORT}/api/users
-  📁 Categories:  http://localhost:${PORT}/api/categories
-  🛒  Cart:        http://localhost:${PORT}/api/cart
-  👑 Admin:       http://localhost:${PORT}/api/admin
-  💳 Razorpa:   http://localhost:${PORT}/api/razorpay
-  📦 Orders:     http://localhost:${PORT}/api/orders
+  🔐  Auth:        http://localhost:${PORT}/api/auth
+  🛍️   Products:    http://localhost:${PORT}/api/products
+  ❤️   Wishlist:    http://localhost:${PORT}/api/wishlist
+  👤  Users:       http://localhost:${PORT}/api/users
+  📁  Categories:  http://localhost:${PORT}/api/categories
+  🛒   Cart:        http://localhost:${PORT}/api/cart
+  👑  Admin:       http://localhost:${PORT}/api/admin
+  💳  Razorpay:    http://localhost:${PORT}/api/razorpay
+  📦  Orders:      http://localhost:${PORT}/api/orders
+  🚚  Shipping:    http://localhost:${PORT}/api/shipping
+  📮  NimbusPost:  http://localhost:${PORT}/api/nimbuspost
+
+🔗 IMPORTANT LINKS:
+  • NimbusPost Dashboard: https://ship.nimbuspost.com
+  • Razorpay Dashboard: https://dashboard.razorpay.com
+  • MongoDB Atlas: https://cloud.mongodb.com
+
+⚠️  CHECK THESE FIRST IF ERRORS:
+  1. .env file has all required variables
+  2. NimbusPost credentials are correct
+  3. Razorpay keys are valid
+  4. MongoDB connection is active
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.
