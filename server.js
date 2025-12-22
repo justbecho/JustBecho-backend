@@ -395,7 +395,7 @@ const startServer = async () => {
   📁 Categories:  http://localhost:${PORT}/api/categories
   🛒  Cart:        http://localhost:${PORT}/api/cart
   👑 Admin:       http://localhost:${PORT}/api/admin
-  💳 Razorpay:   http://localhost:${PORT}/api/razorpay
+  💳 Razorpa:   http://localhost:${PORT}/api/razorpay
   📦 Orders:     http://localhost:${PORT}/api/orders
 
 ──────────────────────────────────────────────────────────────
