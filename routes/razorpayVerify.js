@@ -1,3 +1,4 @@
+// routes/razorpayVerify.js - UPDATED WITH WAREHOUSE AUTOMATION
 import express from 'express';
 import crypto from 'crypto';
 import Order from '../models/Order.js';
@@ -8,9 +9,9 @@ import nimbuspostService from '../services/nimbuspostService.js';
 
 const router = express.Router();
 
-// ✅ VERIFY PAYMENT WITH NIMBUSPOST SHIPMENT CREATION - COMPLETELY FIXED
+// ✅ VERIFY PAYMENT WITH AUTOMATIC TWO-LEG SHIPMENTS
 router.post('/verify-payment', async (req, res) => {
-  console.log('🔐 [RAZORPAY] Payment verification started...');
+  console.log('🔐 [RAZORPAY] Payment verification with warehouse automation...');
   
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -67,7 +68,7 @@ router.post('/verify-payment', async (req, res) => {
     const cart = await Cart.findById(order.cart)
       .populate({
         path: 'items.product',
-        select: 'productName finalPrice brand condition images seller'
+        select: 'productName finalPrice brand condition images seller weight'
       });
     
     if (!cart) {
@@ -89,7 +90,7 @@ router.post('/verify-payment', async (req, res) => {
         const productId = item.product._id;
         const sellerId = item.product.seller;
         
-        // Update product status (FIXED: use 'pending' instead of 'pending_pickup')
+        // Update product status
         await Product.findByIdAndUpdate(productId, {
           status: 'sold',
           soldAt: new Date(),
@@ -136,10 +137,9 @@ router.post('/verify-payment', async (req, res) => {
       order.seller = sellerIds[0];
     }
 
-    // ✅ 8. CREATE NIMBUSPOST SHIPMENTS (with error handling)
+    // ✅ 8. CREATE AUTOMATIC TWO-LEG SHIPMENTS
     const nimbusShipments = [];
-    let nimbusSuccessCount = 0;
-    let nimbusError = null;
+    let incomingAWBs = [];
     
     if (sellerMap.size > 0) {
       for (const [sellerId, sellerInfo] of sellerMap) {
@@ -154,7 +154,7 @@ router.post('/verify-payment', async (req, res) => {
               continue;
             }
             
-            // Prepare shipment data
+            // Prepare data for two-leg shipment
             const shipmentData = {
               orderData: {
                 orderId: `${order._id}-${product.productId}`,
@@ -163,7 +163,7 @@ router.post('/verify-payment', async (req, res) => {
               productData: {
                 productName: product.productData.productName || 'Product',
                 price: product.price || 0,
-                weight: 500,
+                weight: product.productData.weight || 500,
                 dimensions: { length: 20, breadth: 15, height: 10 }
               },
               sellerData: {
@@ -189,83 +189,85 @@ router.post('/verify-payment', async (req, res) => {
               }
             };
             
-            console.log(`🚚 Creating NimbusPost shipment for product: ${product.productId}`);
+            console.log(`🔄 Creating INCOMING shipment for product: ${product.productId}`);
             
-            const shipmentResult = await nimbuspostService.createB2BShipment(
+            // ✅ CREATE ONLY INCOMING SHIPMENT (Seller → Warehouse)
+            const incomingResult = await nimbuspostService.createB2BShipment(
               shipmentData.orderData,
               shipmentData.productData,
               shipmentData.sellerData,
-              shipmentData.buyerData
+              shipmentData.buyerData,
+              'seller_to_warehouse'  // 🆕 Only incoming for now
             );
             
-            if (shipmentResult.success) {
-              nimbusSuccessCount++;
+            if (incomingResult.success) {
+              incomingAWBs.push(incomingResult.awbNumber);
+              
               nimbusShipments.push({
                 productId: product.productId,
-                awbNumber: shipmentResult.awbNumber,
-                shipmentId: shipmentResult.shipmentId,
-                labelUrl: shipmentResult.labelUrl,
-                trackingUrl: shipmentResult.trackingUrl,
-                courierName: shipmentResult.courierName,
+                awbNumber: incomingResult.awbNumber,
+                shipmentId: incomingResult.shipmentId,
+                shipmentType: 'incoming',
                 status: 'booked',
                 createdAt: new Date(),
-                isMock: shipmentResult.isMock || false
+                trackingUrl: incomingResult.trackingUrl,
+                labelUrl: incomingResult.labelUrl,
+                courierName: incomingResult.courierName
               });
               
-              console.log(`✅ Shipment created: ${shipmentResult.awbNumber}`);
+              console.log(`✅ INCOMING shipment created: ${incomingResult.awbNumber}`);
+              
+              // Save tracking job for automatic forwarding
+              if (!order.metadata) order.metadata = {};
+              if (!order.metadata.trackingJobs) order.metadata.trackingJobs = [];
+              
+              order.metadata.trackingJobs.push({
+                incomingAWB: incomingResult.awbNumber,
+                productId: product.productId,
+                buyerData: shipmentData.buyerData,
+                productData: shipmentData.productData,
+                scheduledAt: new Date(),
+                status: 'monitoring'
+              });
+              
             }
             
           } catch (shipmentError) {
             const errorMsg = shipmentError.message || 'Unknown error';
             console.error(`❌ Shipment failed for product ${product.productId}:`, errorMsg);
             
-            // Check if it's a KYC error
-            const isKYCError = errorMsg.includes('KYC') || 
-                             (shipmentError.response?.data?.message?.includes('KYC'));
-            
             nimbusShipments.push({
               productId: product.productId,
               error: errorMsg,
               status: 'failed',
-              isKYCError: isKYCError,
               createdAt: new Date()
             });
-            
-            if (isKYCError) {
-              nimbusError = 'NimbusPost KYC incomplete. Please complete KYC on NimbusPost dashboard.';
-            }
           }
         }
       }
     }
     
-    console.log(`📊 Shipment results: ${nimbusSuccessCount} successful, ${nimbusShipments.length - nimbusSuccessCount} failed`);
+    console.log(`📊 Shipment results: ${incomingAWBs.length} incoming shipments created`);
 
     // ✅ 9. SAVE NIMBUSPOST SHIPMENTS TO ORDER
     order.nimbuspostShipments = nimbusShipments;
     
-    // ✅ 10. INITIALIZE SHIPPING LEGS (FIXED: use 'pending' instead of 'pending_pickup')
-    const validShipments = nimbusShipments.filter(s => s.awbNumber && !s.error);
-    if (validShipments.length > 0) {
+    // ✅ 10. INITIALIZE SHIPPING LEGS
+    if (incomingAWBs.length > 0) {
       order.shippingLegs = [{
         leg: 'seller_to_warehouse',
-        awbNumbers: validShipments.map(s => s.awbNumber),
-        status: 'pending', // ✅ FIXED: Changed from 'pending_pickup' to 'pending'
+        awbNumbers: incomingAWBs,
+        status: 'pending',
         createdAt: new Date(),
-        notes: 'Awaiting pickup from seller'
+        notes: 'Auto-created: Seller → Warehouse'
       }];
-    } else {
-      order.shippingLegs = [{
-        leg: 'seller_to_warehouse',
-        status: 'pending', // ✅ FIXED: Changed from 'pending_pickup' to 'pending'
-        createdAt: new Date(),
-        notes: nimbusError || 'Shipment creation pending'
-      }];
+      
+      console.log(`📦 Shipping leg created for ${incomingAWBs.length} shipments`);
     }
     
-    // ✅ 11. SAVE ORDER (with validation disabled to avoid enum issues)
+    // ✅ 11. SAVE ORDER
     await order.save({ validateBeforeSave: false });
-    console.log('✅ Order saved successfully');
+    console.log('✅ Order saved with warehouse automation');
 
     // ✅ 12. UPDATE SELLER STATS
     for (const [sellerId, sellerInfo] of sellerMap) {
@@ -303,49 +305,50 @@ router.post('/verify-payment', async (req, res) => {
     // ✅ 15. PREPARE RESPONSE
     const responseData = {
       success: true,
-      message: '🎉 Payment verified successfully! Order placed.',
+      message: '🎉 Payment verified & warehouse automation started!',
       orderId: order._id.toString(),
       paymentId: razorpay_payment_id,
+      automation: {
+        flow: 'Seller → Warehouse → Buyer',
+        step1: 'COMPLETE: Incoming shipment created',
+        step2: 'PENDING: Will auto-forward when delivered to warehouse',
+        incomingShipments: incomingAWBs.length,
+        warehouse: {
+          name: 'JustBecho Warehouse',
+          address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001',
+          contact: 'Devansh Kothari - 9301847748'
+        }
+      },
       orderDetails: {
         totalAmount: order.totalAmount,
         status: order.status,
         itemsCount: productUpdates.length,
         paidAt: order.paidAt
       },
-      updates: {
-        productsSold: productUpdates.length,
-        sellersUpdated: sellerMap.size,
-        successfulShipments: nimbusSuccessCount,
-        totalShipments: nimbusShipments.length
-      }
+      shipments: incomingAWBs.map(awb => ({
+        awbNumber: awb,
+        type: 'incoming',
+        trackingUrl: `https://track.nimbuspost.com/track/${awb}`,
+        status: 'Seller → Warehouse (in transit)'
+      })),
+      instructions: [
+        '✅ Step 1: Seller pickup scheduled',
+        '⏳ Step 2: When delivered to warehouse, outgoing shipment will auto-create',
+        '📦 Step 3: Package forwarded to buyer',
+        '🎉 Step 4: Delivery completed'
+      ]
     };
     
-    // Add shipment info if available
-    const successfulShipments = nimbusShipments.filter(s => s.awbNumber && !s.error);
-    if (successfulShipments.length > 0) {
-      responseData.shipments = successfulShipments.map(s => ({
-        productId: s.productId,
-        awbNumber: s.awbNumber,
-        trackingUrl: s.trackingUrl || `https://track.nimbuspost.com/track/${s.awbNumber}`,
-        status: s.status
-      }));
-      responseData.message += ` ${successfulShipments.length} shipment(s) created.`;
-    }
-    
     // Add warnings if any
-    if (nimbusError) {
-      responseData.warning = nimbusError;
-      if (nimbusError.includes('KYC')) {
-        responseData.instructions = [
-          '⚠️  Payment successful but shipping not created.',
-          '📝 Please complete KYC on NimbusPost dashboard: https://ship.nimbuspost.com',
-          '🔄 Shipping will be created once KYC is complete.',
-          '📞 Contact support if you need assistance.'
-        ];
-      }
+    const failedShipments = nimbusShipments.filter(s => s.error);
+    if (failedShipments.length > 0) {
+      responseData.warnings = failedShipments.map(s => ({
+        productId: s.productId,
+        error: s.error
+      }));
     }
     
-    console.log('✅ Payment verification COMPLETE');
+    console.log('✅ Payment verification COMPLETE with warehouse automation');
     res.json(responseData);
     
   } catch (error) {
@@ -363,7 +366,259 @@ router.post('/verify-payment', async (req, res) => {
   }
 });
 
-// ✅ CHECK ORDER STATUS WITH SHIPPING INFO - FIXED
+// ✅ CREATE NEW: WEBHOOK FOR WAREHOUSE AUTOMATION
+router.post('/warehouse-webhook', async (req, res) => {
+  try {
+    const { event_type, awb_number, current_status } = req.body;
+    
+    console.log('🔔 Warehouse webhook received:', { event_type, awb_number, current_status });
+    
+    if (event_type === 'SHIPMENT_DELIVERED' && current_status === 'Delivered') {
+      // Find order with this incoming AWB
+      const order = await Order.findOne({
+        'nimbuspostShipments.awbNumber': awb_number,
+        'nimbuspostShipments.shipmentType': 'incoming'
+      })
+      .populate('buyer')
+      .populate('products');
+      
+      if (!order) {
+        console.error(`❌ Order not found for AWB: ${awb_number}`);
+        return res.json({ success: false, message: 'Order not found' });
+      }
+      
+      // Find the shipment
+      const incomingShipment = order.nimbuspostShipments.find(s => 
+        s.awbNumber === awb_number && s.shipmentType === 'incoming'
+      );
+      
+      if (!incomingShipment) {
+        console.error(`❌ Incoming shipment not found: ${awb_number}`);
+        return res.json({ success: false, message: 'Shipment not found' });
+      }
+      
+      // Check if outgoing already exists
+      const existingOutgoing = order.nimbuspostShipments.find(s => 
+        s.parentAWB === awb_number && s.shipmentType === 'outgoing'
+      );
+      
+      if (existingOutgoing) {
+        console.log(`⚠️  Outgoing already exists: ${existingOutgoing.awbNumber}`);
+        return res.json({ success: true, message: 'Already forwarded' });
+      }
+      
+      // Get buyer data
+      const buyer = order.buyer || await User.findById(order.user);
+      const product = order.products.find(p => 
+        p._id.toString() === incomingShipment.productId.toString()
+      );
+      
+      if (!product || !buyer) {
+        console.error('❌ Product or buyer not found');
+        return res.json({ success: false, message: 'Data incomplete' });
+      }
+      
+      // Create outgoing shipment (Warehouse → Buyer)
+      console.log(`🚀 Auto-creating OUTGOING shipment for AWB: ${awb_number}`);
+      
+      const outgoingResult = await nimbuspostService.createB2BShipment(
+        {
+          orderId: `${order._id}-${incomingShipment.productId}-OUT`,
+          totalAmount: order.totalAmount || 0
+        },
+        {
+          productName: product.productName,
+          price: product.finalPrice || 0,
+          weight: product.weight || 500
+        },
+        nimbuspostService.WAREHOUSE_DETAILS, // Pickup from warehouse
+        {
+          name: buyer.name || 'Customer',
+          phone: buyer.phone || '',
+          address: order.shippingAddress || buyer.address
+        },
+        'warehouse_to_buyer'
+      );
+      
+      if (outgoingResult.success) {
+        // Update order
+        order.nimbuspostShipments.push({
+          productId: incomingShipment.productId,
+          awbNumber: outgoingResult.awbNumber,
+          shipmentId: outgoingResult.shipmentId,
+          shipmentType: 'outgoing',
+          parentAWB: awb_number,
+          status: 'booked',
+          createdAt: new Date(),
+          trackingUrl: outgoingResult.trackingUrl,
+          labelUrl: outgoingResult.labelUrl,
+          courierName: outgoingResult.courierName
+        });
+        
+        // Update shipping leg
+        const warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+        if (warehouseLeg) {
+          warehouseLeg.status = 'completed';
+          warehouseLeg.completedAt = new Date();
+          warehouseLeg.notes = 'Delivered to warehouse, auto-forwarded to buyer';
+        }
+        
+        // Add outgoing leg
+        order.shippingLegs.push({
+          leg: 'warehouse_to_buyer',
+          awbNumbers: [outgoingResult.awbNumber],
+          status: 'pending',
+          createdAt: new Date(),
+          notes: 'Auto-created: Warehouse → Buyer'
+        });
+        
+        // Update order status
+        order.status = 'processing';
+        
+        await order.save();
+        
+        console.log(`✅ OUTGOING shipment created: ${outgoingResult.awbNumber}`);
+        
+        // Send notification
+        console.log(`📧 Notification: Package ${awb_number} forwarded to buyer as ${outgoingResult.awbNumber}`);
+        
+        return res.json({
+          success: true,
+          message: 'Outgoing shipment auto-created',
+          incomingAWB: awb_number,
+          outgoingAWB: outgoingResult.awbNumber,
+          trackingUrl: outgoingResult.trackingUrl
+        });
+      }
+    }
+    
+    res.json({ success: true, message: 'Webhook processed' });
+    
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ✅ MANUAL TRIGGER FOR OUTGOING SHIPMENT
+router.post('/trigger-outgoing/:awb', async (req, res) => {
+  try {
+    const { awb } = req.params;
+    
+    console.log(`🚀 Manually triggering outgoing for AWB: ${awb}`);
+    
+    // Call the webhook handler directly
+    const result = await handleOutgoingCreation(awb);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(400).json(result);
+    }
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Helper function for outgoing creation
+async function handleOutgoingCreation(awb) {
+  // Same logic as webhook handler
+  const order = await Order.findOne({
+    'nimbuspostShipments.awbNumber': awb,
+    'nimbuspostShipments.shipmentType': 'incoming'
+  })
+  .populate('buyer')
+  .populate('products');
+  
+  if (!order) {
+    return { success: false, message: 'Order not found' };
+  }
+  
+  const incomingShipment = order.nimbuspostShipments.find(s => 
+    s.awbNumber === awb && s.shipmentType === 'incoming'
+  );
+  
+  if (!incomingShipment) {
+    return { success: false, message: 'Incoming shipment not found' };
+  }
+  
+  const buyer = order.buyer || await User.findById(order.user);
+  const product = order.products.find(p => 
+    p._id.toString() === incomingShipment.productId.toString()
+  );
+  
+  if (!product || !buyer) {
+    return { success: false, message: 'Data incomplete' };
+  }
+  
+  const outgoingResult = await nimbuspostService.createB2BShipment(
+    {
+      orderId: `${order._id}-${incomingShipment.productId}-OUT`,
+      totalAmount: order.totalAmount || 0
+    },
+    {
+      productName: product.productName,
+      price: product.finalPrice || 0,
+      weight: product.weight || 500
+    },
+    nimbuspostService.WAREHOUSE_DETAILS,
+    {
+      name: buyer.name || 'Customer',
+      phone: buyer.phone || '',
+      address: order.shippingAddress || buyer.address
+    },
+    'warehouse_to_buyer'
+  );
+  
+  if (outgoingResult.success) {
+    order.nimbuspostShipments.push({
+      productId: incomingShipment.productId,
+      awbNumber: outgoingResult.awbNumber,
+      shipmentId: outgoingResult.shipmentId,
+      shipmentType: 'outgoing',
+      parentAWB: awb,
+      status: 'booked',
+      createdAt: new Date(),
+      trackingUrl: outgoingResult.trackingUrl,
+      labelUrl: outgoingResult.labelUrl,
+      courierName: outgoingResult.courierName
+    });
+    
+    const warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+    if (warehouseLeg) {
+      warehouseLeg.status = 'completed';
+      warehouseLeg.completedAt = new Date();
+    }
+    
+    order.shippingLegs.push({
+      leg: 'warehouse_to_buyer',
+      awbNumbers: [outgoingResult.awbNumber],
+      status: 'pending',
+      createdAt: new Date(),
+      notes: 'Manually triggered: Warehouse → Buyer'
+    });
+    
+    order.status = 'processing';
+    
+    await order.save();
+    
+    return {
+      success: true,
+      message: 'Outgoing shipment created',
+      incomingAWB: awb,
+      outgoingAWB: outgoingResult.awbNumber,
+      trackingUrl: outgoingResult.trackingUrl
+    };
+  }
+  
+  return { success: false, message: 'Failed to create outgoing shipment' };
+}
+
+// ✅ GET ORDER STATUS WITH WAREHOUSE INFO
 router.get('/order-status/:orderId', async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
@@ -378,20 +633,19 @@ router.get('/order-status/:orderId', async (req, res) => {
       });
     }
     
-    // Get tracking info for each shipment
+    // Get tracking info
     const trackingPromises = [];
     if (order.nimbuspostShipments) {
       for (const shipment of order.nimbuspostShipments) {
-        if (shipment.awbNumber && !shipment.error && !shipment.isMock) {
+        if (shipment.awbNumber && !shipment.error) {
           trackingPromises.push(
             nimbuspostService.trackShipment(shipment.awbNumber)
               .then(trackingData => ({
-                productId: shipment.productId,
                 awbNumber: shipment.awbNumber,
+                shipmentType: shipment.shipmentType,
                 tracking: trackingData
               }))
               .catch(error => ({
-                productId: shipment.productId,
                 awbNumber: shipment.awbNumber,
                 error: error.message
               }))
@@ -409,18 +663,26 @@ router.get('/order-status/:orderId', async (req, res) => {
         buyer: order.buyer,
         seller: order.seller,
         totalAmount: order.totalAmount,
-        razorpayOrderId: order.razorpayOrderId,
-        razorpayPaymentId: order.razorpayPaymentId,
         status: order.status,
         paidAt: order.paidAt,
         products: order.products,
-        createdAt: order.createdAt,
+        
+        // Warehouse Automation Info
+        warehouseFlow: {
+          hasIncoming: order.nimbuspostShipments?.some(s => s.shipmentType === 'incoming'),
+          hasOutgoing: order.nimbuspostShipments?.some(s => s.shipmentType === 'outgoing'),
+          warehouse: {
+            name: 'JustBecho Warehouse',
+            address: 'Indore, MP - 452001',
+            contact: 'Devansh Kothari - 9301847748'
+          }
+        },
         
         // Shipping Information
         shippingLegs: order.shippingLegs || [],
         nimbuspostShipments: order.nimbuspostShipments || [],
         
-        // Live Tracking Results
+        // Live Tracking
         liveTracking: trackingResults
           .filter(result => result.status === 'fulfilled')
           .map(result => result.value)
@@ -435,141 +697,75 @@ router.get('/order-status/:orderId', async (req, res) => {
   }
 });
 
-// ✅ UPDATE SHIPPING STATUS - FIXED (removed 'picked_up' status)
-router.put('/update-shipping/:orderId', async (req, res) => {
+// ✅ GET WAREHOUSE DASHBOARD
+router.get('/warehouse-dashboard', async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const { status, leg, awbNumber, notes } = req.body;
-    
-    const order = await Order.findById(orderId);
-    
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-    
-    if (leg === 'seller_to_warehouse') {
-      // Mark as picked up from seller
-      const legIndex = order.shippingLegs.findIndex(l => l.leg === 'seller_to_warehouse');
-      
-      if (legIndex === -1) {
-        order.shippingLegs.push({
+    // Orders at warehouse (incoming delivered, outgoing not created)
+    const atWarehouse = await Order.find({
+      'nimbuspostShipments.shipmentType': 'incoming',
+      'shippingLegs': {
+        $elemMatch: {
           leg: 'seller_to_warehouse',
-          status: 'in_transit', // ✅ FIXED: Changed from 'picked_up' to 'in_transit'
-          awbNumbers: order.nimbuspostShipments?.map(s => s.awbNumber).filter(Boolean),
-          startedAt: new Date(),
-          notes: notes || 'Pickup completed from seller'
-        });
-      } else {
-        order.shippingLegs[legIndex].status = 'in_transit'; // ✅ FIXED: Changed from 'picked_up' to 'in_transit'
-        order.shippingLegs[legIndex].completedAt = new Date();
-        order.shippingLegs[legIndex].notes = notes;
+          status: 'completed'
+        }
+      },
+      'nimbuspostShipments': {
+        $not: {
+          $elemMatch: {
+            shipmentType: 'outgoing'
+          }
+        }
       }
-      
-      // Update products shipping status
-      await Product.updateMany(
-        { _id: { $in: order.products } },
-        { $set: { shippingStatus: 'in_transit', shippedAt: new Date() } }
-      );
-      
-      // Update NimbusPost shipments
-      if (order.nimbuspostShipments) {
-        order.nimbuspostShipments = order.nimbuspostShipments.map(shipment => ({
-          ...shipment,
-          status: 'in_transit',
-          pickedUpAt: new Date()
-        }));
-      }
-      
-    } else if (leg === 'warehouse_to_buyer') {
-      // Mark as shipped from warehouse to buyer
-      order.shippingLegs.push({
-        leg: 'warehouse_to_buyer',
-        status: 'in_transit',
-        awbNumber: awbNumber,
-        startedAt: new Date(),
-        notes: notes || 'Shipped to buyer'
-      });
-      
-      // Update order status
-      order.status = 'shipped';
-      order.shippedAt = new Date();
-      
-    } else if (leg === 'delivered') {
-      // Mark as delivered
-      const warehouseLegIndex = order.shippingLegs.findIndex(l => l.leg === 'warehouse_to_buyer');
-      
-      if (warehouseLegIndex !== -1) {
-        order.shippingLegs[warehouseLegIndex].status = 'completed';
-        order.shippingLegs[warehouseLegIndex].completedAt = new Date();
-        order.shippingLegs[warehouseLegIndex].notes = notes || 'Delivered to buyer';
-      } else {
-        order.shippingLegs.push({
-          leg: 'warehouse_to_buyer',
-          status: 'completed',
-          completedAt: new Date(),
-          notes: notes || 'Delivered to buyer'
-        });
-      }
-      
-      // Update order status
-      order.status = 'delivered';
-      order.deliveredAt = new Date();
-      
-      // Update products as delivered
-      await Product.updateMany(
-        { _id: { $in: order.products } },
-        { $set: { shippingStatus: 'delivered', deliveredAt: new Date() } }
-      );
-      
-      // Update all NimbusPost shipments status
-      if (order.nimbuspostShipments) {
-        order.nimbuspostShipments = order.nimbuspostShipments.map(shipment => ({
-          ...shipment,
-          status: 'delivered',
-          deliveredAt: new Date()
-        }));
-      }
-    }
+    })
+    .populate('buyer', 'name')
+    .populate('products', 'productName')
+    .sort({ updatedAt: -1 });
     
-    await order.save({ validateBeforeSave: false });
+    // Recently forwarded
+    const forwarded = await Order.find({
+      'nimbuspostShipments.shipmentType': 'outgoing'
+    })
+    .populate('buyer', 'name')
+    .sort({ updatedAt: -1 })
+    .limit(10);
     
     res.json({
       success: true,
-      message: `Shipping status updated to ${status || 'updated'}`,
-      order: {
-        id: order._id,
-        status: order.status,
-        shippingLegs: order.shippingLegs,
-        shippingStatus: order.shippingLegs[order.shippingLegs.length - 1]?.status || 'pending'
-      }
+      warehouse: {
+        name: "JustBecho Warehouse",
+        address: "103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001",
+        contact: "Devansh Kothari - 9301847748",
+        manager: "Devansh Kothari"
+      },
+      stats: {
+        atWarehouse: atWarehouse.length,
+        pendingForward: atWarehouse.length,
+        forwardedToday: forwarded.length,
+        totalOrders: atWarehouse.length + forwarded.length
+      },
+      atWarehouse: atWarehouse.map(order => ({
+        orderId: order._id,
+        buyer: order.buyer?.name,
+        products: order.products?.map(p => p.productName),
+        incomingAWB: order.nimbuspostShipments
+          .filter(s => s.shipmentType === 'incoming')
+          .map(s => s.awbNumber),
+        arrivedAt: order.shippingLegs
+          .find(l => l.leg === 'seller_to_warehouse')?.completedAt,
+        actionRequired: true
+      })),
+      recentlyForwarded: forwarded.map(order => ({
+        orderId: order._id,
+        buyer: order.buyer?.name,
+        outgoingAWB: order.nimbuspostShipments
+          .filter(s => s.shipmentType === 'outgoing')
+          .map(s => s.awbNumber),
+        forwardedAt: order.shippingLegs
+          .find(l => l.leg === 'warehouse_to_buyer')?.startedAt
+      }))
     });
     
   } catch (error) {
-    console.error('Update shipping error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Update failed: ' + error.message
-    });
-  }
-});
-
-// ✅ GET USER ORDERS
-router.get('/user-orders/:userId', async (req, res) => {
-  try {
-    const orders = await Order.find({ user: req.params.userId })
-      .sort({ createdAt: -1 })
-      .populate('products', 'productName images finalPrice');
-    
-    res.json({
-      success: true,
-      orders: orders,
-      count: orders.length
-    });
-  } catch (error) {
-    console.error('User orders error:', error);
     res.status(500).json({
       success: false,
       message: error.message

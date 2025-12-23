@@ -1,4 +1,4 @@
-// services/nimbuspostService.js - OPTIMIZED WITH BETTER ERROR HANDLING
+// services/nimbuspostService.js - COMPLETE UPDATED CODE WITH WAREHOUSE AUTOMATION
 import axios from 'axios';
 import { NIMBUSPOST_CONFIG, NIMBUSPOST_ENDPOINTS } from '../config/nimbuspostConfig.js';
 
@@ -10,7 +10,7 @@ class NimbusPostService {
     this.token = null;
     this.tokenExpiry = null;
     
-    // ✅ WAREHOUSE DETAILS - HARDCODED (Aapka address)
+    // ✅ WAREHOUSE DETAILS - HARDCODED
     this.WAREHOUSE_DETAILS = {
       name: "Devansh Kothari",
       company: "JustBecho Warehouse",
@@ -38,30 +38,24 @@ class NimbusPostService {
           headers: { 
             'Content-Type': 'application/json',
             'x-api-key': this.apiKey
-          },
-          timeout: 10000 // 10 seconds timeout
+          }
         }
       );
       
       if (response.data.status && response.data.data) {
         this.token = response.data.data;
-        this.tokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-        console.log('✅ Token generated successfully');
+        this.tokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
         return this.token;
       } else {
-        throw new Error('Failed to get token: ' + (response.data.message || 'No token in response'));
+        throw new Error('Failed to get token: ' + response.data.message);
       }
     } catch (error) {
-      console.error('❌ Token generation error:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data
-      });
+      console.error('❌ Token generation error:', error.response?.data || error.message);
       throw new Error(`Authentication failed: ${error.message}`);
     }
   }
   
-  // ✅ 2. GET VALID TOKEN (with retry)
+  // ✅ 2. GET VALID TOKEN
   async getToken() {
     if (this.token && this.tokenExpiry && new Date() < this.tokenExpiry) {
       return this.token;
@@ -69,21 +63,12 @@ class NimbusPostService {
     return await this.generateToken();
   }
   
-  // ✅ 3. CREATE SHIPMENT WITH WAREHOUSE SUPPORT (IMPROVED)
+  // ✅ 3. CREATE SHIPMENT WITH WAREHOUSE SUPPORT (UPDATED)
   async createB2BShipment(orderData, productData, sellerData, buyerData, shipmentType = 'seller_to_warehouse') {
     try {
       const token = await this.getToken();
       
-      console.log(`🚚 Creating ${shipmentType} shipment for order: ${orderData.orderId}`);
-      
-      // ✅ VALIDATE REQUIRED DATA
-      if (!sellerData?.phone && shipmentType === 'seller_to_warehouse') {
-        console.warn('⚠️ Seller phone not provided, using default');
-      }
-      
-      if (!buyerData?.phone && shipmentType === 'warehouse_to_buyer') {
-        console.warn('⚠️ Buyer phone not provided, using default');
-      }
+      console.log('🚚 Creating shipment:', shipmentType, 'for order:', orderData.orderId);
       
       // ✅ DETERMINE SOURCE & DESTINATION
       let pickupDetails, deliveryDetails;
@@ -93,7 +78,7 @@ class NimbusPostService {
         pickupDetails = {
           warehouse_name: sellerData.name || 'Seller',
           name: sellerData.name || 'Seller',
-          address: sellerData.address?.street || sellerData.address || 'Seller address',
+          address: sellerData.address?.street || 'Seller address',
           address_2: sellerData.address?.street2 || '',
           city: sellerData.address?.city || 'City',
           state: sellerData.address?.state || 'State',
@@ -132,18 +117,16 @@ class NimbusPostService {
           consignee_company_name: buyerData.name || 'Individual',
           consignee_phone: buyerData.phone || '9876543210',
           consignee_email: buyerData.email || '',
-          consignee_address: buyerData.address?.street || buyerData.address || 'Address not provided',
+          consignee_address: buyerData.address?.street || 'Address not provided',
           consignee_pincode: buyerData.address?.pincode || '110001',
           consignee_city: buyerData.address?.city || 'City',
           consignee_state: buyerData.address?.state || 'State',
         };
         
         console.log('🚚 Creating OUTGOING shipment: Warehouse → Buyer');
-      } else {
-        throw new Error(`Invalid shipment type: ${shipmentType}`);
       }
       
-      // ✅ SHIPMENT PAYLOAD (OPTIMIZED)
+      // ✅ SHIPMENT PAYLOAD
       const shipmentPayload = {
         order_id: shipmentType === 'seller_to_warehouse' 
           ? `JB-IN-${orderData.orderId}`  // IN = Incoming
@@ -158,7 +141,7 @@ class NimbusPostService {
         // ✅ SHIPMENT DETAILS
         no_of_invoices: 1,
         no_of_boxes: 1,
-        courier_id: NIMBUSPOST_CONFIG.defaultCourierId || 110, // Default to Delhivery
+        courier_id: NIMBUSPOST_CONFIG.defaultCourierId,
         request_auto_pickup: 'yes',
         
         // ✅ INVOICE DETAILS
@@ -167,7 +150,7 @@ class NimbusPostService {
             ? `INV-IN-${orderData.orderId}`
             : `INV-OUT-${orderData.orderId}`,
           invoice_date: new Date().toISOString().split('T')[0],
-          invoice_value: orderData.totalAmount || 0,
+          invoice_value: orderData.totalAmount,
           ebn_number: '',
           ebn_expiry_date: ''
         }],
@@ -193,71 +176,44 @@ class NimbusPostService {
         }]
       };
       
-      console.log(`📦 Preparing ${shipmentType} shipment payload...`);
+      console.log('📦 Shipment payload for', shipmentType);
       
-      // ✅ MAKE API CALL WITH RETRY
-      const maxRetries = 2;
-      let lastError;
-      
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          console.log(`Attempt ${attempt}/${maxRetries} to create shipment...`);
-          
-          const response = await axios.post(
-            `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
-            shipmentPayload,
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-api-key': this.apiKey
-              },
-              timeout: 30000 // 30 seconds timeout
-            }
-          );
-          
-          if (response.data.status) {
-            const shipment = response.data.data;
-            console.log(`✅ ${shipmentType.toUpperCase()} shipment created! AWB: ${shipment.awb_number}`);
-            
-            return {
-              success: true,
-              shipmentType: shipmentType,
-              awbNumber: shipment.awb_number,
-              shipmentId: shipment.shipment_id,
-              orderId: shipment.order_id,
-              labelUrl: shipment.label,
-              manifestUrl: shipment.manifest,
-              courierName: shipment.courier_name,
-              status: shipment.status,
-              trackingUrl: `https://track.nimbuspost.com/track/${shipment.awb_number}`,
-              rawResponse: response.data,
-              warehouse: this.WAREHOUSE_DETAILS
-            };
-          } else {
-            lastError = new Error(response.data.message || 'Shipment creation failed');
-          }
-        } catch (error) {
-          lastError = error;
-          console.warn(`Attempt ${attempt} failed:`, error.message);
-          
-          // Wait before retry (exponential backoff)
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-          }
+      // ✅ MAKE API CALL
+      const response = await axios.post(
+        `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
+        shipmentPayload,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'x-api-key': this.apiKey
+          },
+          timeout: 30000
         }
+      );
+      
+      if (response.data.status) {
+        const shipment = response.data.data;
+        console.log('✅ Shipment created! AWB:', shipment.awb_number, 'Type:', shipmentType);
+        
+        return {
+          success: true,
+          shipmentType: shipmentType,
+          awbNumber: shipment.awb_number,
+          shipmentId: shipment.shipment_id,
+          orderId: shipment.order_id,
+          labelUrl: shipment.label,
+          manifestUrl: shipment.manifest,
+          courierName: shipment.courier_name,
+          status: shipment.status,
+          trackingUrl: `https://track.nimbuspost.com/track/${shipment.awb_number}`,
+          rawResponse: response.data
+        };
+      } else {
+        throw new Error(response.data.message || 'Shipment creation failed');
       }
-      
-      // All retries failed
-      throw lastError || new Error('Shipment creation failed after retries');
-      
     } catch (error) {
-      console.error(`❌ Create ${shipmentType} shipment error:`, {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        orderId: orderData.orderId
-      });
+      console.error('❌ Create shipment error:', error.message);
       throw error;
     }
   }
@@ -282,21 +238,19 @@ class NimbusPostService {
       
       console.log('✅ Step 1 complete: Incoming shipment created', incomingResult.awbNumber);
       
-      // Return with instructions for next step
+      // STEP 2: Setup monitoring for incoming shipment
+      // In production, you would setup webhook here
+      // For now, we'll return both and let frontend schedule step 2
+      
       return {
         success: true,
         message: 'Two-leg shipment process started',
         incoming: incomingResult,
-        instructions: {
-          step1: '✅ Incoming shipment created (Seller → Warehouse)',
-          step2: '⏳ Monitor incoming shipment for delivery',
-          step3: '🔔 When delivered, call createB2BShipment with shipmentType = "warehouse_to_buyer"',
-          webhook: 'Setup webhook at /api/razorpay/warehouse-webhook for auto-forwarding'
-        },
-        tracking: {
+        nextStep: {
+          action: 'monitor_incoming_delivery',
           incomingAWB: incomingResult.awbNumber,
-          trackingUrl: incomingResult.trackingUrl,
-          warehouse: this.WAREHOUSE_DETAILS
+          triggerWhen: 'when status = "Delivered"',
+          then: 'call createB2BShipment with shipmentType = "warehouse_to_buyer"'
         }
       };
       
@@ -306,7 +260,7 @@ class NimbusPostService {
     }
   }
   
-  // ✅ 5. TRACK SHIPMENT (with caching)
+  // ✅ 5. TRACK SHIPMENT
   async trackShipment(awbNumber) {
     try {
       const token = await this.getToken();
@@ -318,53 +272,22 @@ class NimbusPostService {
             'Authorization': `Bearer ${token}`,
             'x-api-key': this.apiKey,
             'Content-Type': 'application/json'
-          },
-          timeout: 10000
+          }
         }
       );
       
       if (response.data.status) {
-        return {
-          success: true,
-          awb: awbNumber,
-          data: response.data.data,
-          status: response.data.data.current_status || 'unknown',
-          timestamp: new Date()
-        };
+        return response.data.data;
       } else {
         throw new Error(response.data.message || 'Tracking failed');
       }
     } catch (error) {
-      console.error('❌ Track error for AWB', awbNumber, ':', error.message);
+      console.error('❌ Track error:', error.message);
       throw error;
     }
   }
   
-  // ✅ 6. CHECK IF SHIPMENT DELIVERED (SPECIAL FUNCTION FOR AUTOMATION)
-  async isShipmentDelivered(awbNumber) {
-    try {
-      const tracking = await this.trackShipment(awbNumber);
-      
-      if (tracking.success) {
-        const isDelivered = tracking.status === 'Delivered';
-        console.log(`📦 AWB ${awbNumber} status: ${tracking.status}, Delivered: ${isDelivered}`);
-        
-        return {
-          delivered: isDelivered,
-          status: tracking.status,
-          data: tracking.data,
-          timestamp: tracking.timestamp
-        };
-      }
-      
-      return { delivered: false, status: 'unknown', error: 'Tracking failed' };
-    } catch (error) {
-      console.error('❌ Delivery check error:', error.message);
-      return { delivered: false, status: 'error', error: error.message };
-    }
-  }
-  
-  // ✅ 7. CANCEL SHIPMENT
+  // ✅ 6. CANCEL SHIPMENT
   async cancelShipment(awbNumber) {
     try {
       const token = await this.getToken();
@@ -382,11 +305,7 @@ class NimbusPostService {
       );
       
       if (response.data.status) {
-        return { 
-          success: true, 
-          message: response.data.message,
-          awb: awbNumber
-        };
+        return { success: true, message: response.data.message };
       } else {
         throw new Error(response.data.message || 'Cancellation failed');
       }
@@ -396,7 +315,7 @@ class NimbusPostService {
     }
   }
   
-  // ✅ 8. CHECK WALLET BALANCE
+  // ✅ 7. CHECK WALLET BALANCE
   async checkWalletBalance() {
     try {
       const token = await this.getToken();
@@ -413,12 +332,7 @@ class NimbusPostService {
       );
       
       if (response.data.status) {
-        return {
-          success: true,
-          balance: response.data.data,
-          available_limit: response.data.data?.available_limit || 0,
-          timestamp: new Date()
-        };
+        return response.data.data;
       } else {
         throw new Error(response.data.message || 'Balance check failed');
       }
@@ -428,19 +342,7 @@ class NimbusPostService {
     }
   }
   
-  // ✅ 9. GET WAREHOUSE DETAILS (Public method)
-  getWarehouseDetails() {
-    return {
-      ...this.WAREHOUSE_DETAILS,
-      automation: {
-        incoming_shipment: 'seller_to_warehouse',
-        outgoing_shipment: 'warehouse_to_buyer',
-        flow: 'Seller → Warehouse → Buyer'
-      }
-    };
-  }
-  
-  // ✅ 10. TEST CONNECTION (Enhanced)
+  // ✅ 8. TEST CONNECTION
   async testConnection() {
     try {
       const token = await this.getToken();
@@ -449,53 +351,17 @@ class NimbusPostService {
       return {
         success: true,
         message: '✅ NimbusPost connection successful!',
-        token: token ? token.substring(0, 30) + '...' : 'No token',
+        token: token.substring(0, 30) + '...',
         walletBalance: balance?.available_limit || 0,
         email: this.credentials.email,
-        warehouse: this.WAREHOUSE_DETAILS,
-        apiStatus: 'Connected',
-        timestamp: new Date()
+        warehouse: this.WAREHOUSE_DETAILS
       };
     } catch (error) {
       return {
         success: false,
-        message: '❌ Connection failed: ' + error.message,
-        warehouse: this.WAREHOUSE_DETAILS,
-        apiStatus: 'Disconnected',
-        timestamp: new Date()
+        message: '❌ Connection failed: ' + error.message
       };
     }
-  }
-  
-  // ✅ 11. BULK SHIPMENT CREATION (For multiple products)
-  async createBulkShipments(orders) {
-    const results = [];
-    
-    for (const order of orders) {
-      try {
-        const result = await this.createB2BShipment(
-          order.orderData,
-          order.productData,
-          order.sellerData,
-          order.buyerData,
-          order.shipmentType || 'seller_to_warehouse'
-        );
-        results.push({ success: true, ...result });
-      } catch (error) {
-        results.push({
-          success: false,
-          error: error.message,
-          orderId: order.orderData.orderId
-        });
-      }
-    }
-    
-    return {
-      total: orders.length,
-      successful: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
-      results: results
-    };
   }
 }
 
