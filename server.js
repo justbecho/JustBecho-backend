@@ -1,4 +1,4 @@
-// server.js - COMPLETE UPDATED VERSION WITH WAREHOUSE AUTOMATION
+// server.js - COMPLETE UPDATED VERSION WITH SETINTERVAL (NO NODE-CRON)
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -6,7 +6,6 @@ import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
-import cron from 'node-cron'; // ✅ ADDED FOR CRON JOBS
 
 // ✅ Load environment variables FIRST
 dotenv.config();
@@ -15,6 +14,7 @@ console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║           🚀 JUST BECHO SERVER - WAREHOUSE AUTOMATION        ║
 ║                📦 SELLER → WAREHOUSE → BUYER                 ║
+║              ⏰ AUTO-CHECK WITH SETINTERVAL                   ║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 
@@ -65,7 +65,7 @@ const connectDB = async () => {
   }
 };
 
-// ✅ IMPORT MODELS (IMPORTANT: Do this BEFORE importing routes)
+// ✅ IMPORT MODELS
 console.log('📂 Loading models...');
 import './models/User.js';
 import './models/Product.js';
@@ -91,7 +91,7 @@ import shippingRoutes from "./routes/shippingRoutes.js";
 
 const app = express();
 
-// ✅ SIMPLE CORS Configuration
+// ✅ CORS Configuration
 const corsOptions = {
   origin: [
     'https://www.justbecho.com',
@@ -109,15 +109,12 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token']
 };
 
-// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// ✅ MANUAL CORS HEADERS (Backup)
+// ✅ Manual CORS Headers
 app.use((req, res, next) => {
-  // Add CORS headers to ALL responses
   const origin = req.headers.origin;
   
-  // Check if origin is in allowed list
   const allowedOrigins = [
     'https://www.justbecho.com',
     'https://justbecho.com',
@@ -137,7 +134,6 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Auth-Token');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -145,14 +141,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Body parsing middleware
+// ✅ Body parsing
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// ✅ Request logging middleware
+// ✅ Request logging
 app.use((req, res, next) => {
   const startTime = Date.now();
-  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url} | Origin: ${req.headers.origin || 'No Origin'}`);
+  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
@@ -180,7 +176,229 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api/nimbuspost", nimbuspostTestRoutes);
 
-// ✅ WAREHOUSE AUTOMATION INFO ENDPOINT
+// ✅ WAREHOUSE AUTOMATION WITH SETINTERVAL
+let isCheckingWarehouse = false;
+
+// ✅ WAREHOUSE CHECK FUNCTION (Using setInterval)
+async function checkWarehouseShipments() {
+  if (isCheckingWarehouse) {
+    console.log('⏳ Warehouse check already in progress, skipping...');
+    return;
+  }
+  
+  isCheckingWarehouse = true;
+  
+  try {
+    console.log('🕐 [WAREHOUSE] Starting automatic check...');
+    
+    // Dynamically import to avoid circular dependencies
+    const Order = (await import('./models/Order.js')).default;
+    const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
+    
+    // Find orders with incoming shipments at warehouse
+    const orders = await Order.find({
+      'nimbuspostShipments.shipmentType': 'incoming',
+      'shippingLegs': {
+        $elemMatch: {
+          leg: 'seller_to_warehouse',
+          status: { $in: ['pending', 'in_transit'] }
+        }
+      }
+    })
+    .populate('buyer', 'name phone address')
+    .populate('products', 'productName weight finalPrice');
+    
+    console.log(`📊 [WAREHOUSE] Found ${orders.length} orders with incoming shipments`);
+    
+    let processed = 0;
+    let errors = 0;
+    
+    for (const order of orders) {
+      const incomingShipments = order.nimbuspostShipments.filter(s => 
+        s.shipmentType === 'incoming' && s.awbNumber
+      );
+      
+      for (const shipment of incomingShipments) {
+        try {
+          console.log(`🔍 Checking AWB: ${shipment.awbNumber}`);
+          
+          // Check if shipment is delivered to warehouse
+          const status = await nimbuspostService.isShipmentDelivered(shipment.awbNumber);
+          
+          if (status.delivered) {
+            console.log(`✅ AWB ${shipment.awbNumber} delivered to warehouse!`);
+            
+            // Check if outgoing already exists
+            const existingOutgoing = order.nimbuspostShipments.find(s => 
+              s.parentAWB === shipment.awbNumber && s.shipmentType === 'outgoing'
+            );
+            
+            if (existingOutgoing) {
+              console.log(`⚠️  Outgoing already exists: ${existingOutgoing.awbNumber}`);
+              continue;
+            }
+            
+            // Get product
+            const product = order.products.find(p => 
+              p._id.toString() === shipment.productId?.toString()
+            );
+            
+            if (!product || !order.buyer) {
+              console.error('❌ Product or buyer not found');
+              continue;
+            }
+            
+            // Create outgoing shipment (Warehouse → Buyer)
+            console.log(`🚀 Creating outgoing shipment for AWB ${shipment.awbNumber}`);
+            
+            const outgoingResult = await nimbuspostService.createB2BShipment(
+              {
+                orderId: `${order._id}-${shipment.productId}-OUT`,
+                totalAmount: order.totalAmount || 0
+              },
+              {
+                productName: product.productName,
+                price: product.finalPrice || 0,
+                weight: product.weight || 500
+              },
+              nimbuspostService.WAREHOUSE_DETAILS, // Pickup from warehouse
+              {
+                name: order.buyer.name || 'Customer',
+                phone: order.buyer.phone || '',
+                address: order.shippingAddress || order.buyer.address || 'Address not provided'
+              },
+              'warehouse_to_buyer'
+            );
+            
+            if (outgoingResult.success) {
+              // Update order
+              order.nimbuspostShipments.push({
+                productId: shipment.productId,
+                awbNumber: outgoingResult.awbNumber,
+                shipmentId: outgoingResult.shipmentId,
+                shipmentType: 'outgoing',
+                parentAWB: shipment.awbNumber,
+                status: 'booked',
+                createdAt: new Date(),
+                trackingUrl: outgoingResult.trackingUrl,
+                labelUrl: outgoingResult.labelUrl,
+                courierName: outgoingResult.courierName
+              });
+              
+              // Update shipping legs
+              const warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+              if (warehouseLeg) {
+                warehouseLeg.status = 'completed';
+                warehouseLeg.completedAt = new Date();
+                warehouseLeg.notes = `Auto-forwarded to buyer (${outgoingResult.awbNumber})`;
+              }
+              
+              // Add outgoing leg
+              order.shippingLegs.push({
+                leg: 'warehouse_to_buyer',
+                awbNumbers: [outgoingResult.awbNumber],
+                status: 'pending',
+                createdAt: new Date(),
+                notes: 'Auto-created: Warehouse → Buyer'
+              });
+              
+              // Update order status
+              order.status = 'processing';
+              
+              await order.save();
+              
+              console.log(`✅ Auto-forwarded: ${shipment.awbNumber} → ${outgoingResult.awbNumber}`);
+              processed++;
+              
+              // Send notification (you can implement this)
+              console.log(`📧 Notification: Order ${order._id} forwarded to buyer`);
+            }
+          } else {
+            console.log(`⏳ AWB ${shipment.awbNumber} status: ${status.status}`);
+          }
+        } catch (error) {
+          console.error(`❌ Error processing AWB ${shipment.awbNumber}:`, error.message);
+          errors++;
+        }
+      }
+    }
+    
+    console.log(`✅ [WAREHOUSE] Check completed: ${processed} forwarded, ${errors} errors`);
+    
+  } catch (error) {
+    console.error('❌ [WAREHOUSE] Check error:', error);
+  } finally {
+    isCheckingWarehouse = false;
+  }
+}
+
+// ✅ SETUP WAREHOUSE AUTO-CHECK INTERVAL
+function setupWarehouseAutoCheck() {
+  const CHECK_INTERVAL = process.env.WAREHOUSE_CHECK_INTERVAL || 30 * 60 * 1000; // 30 minutes default
+  
+  console.log(`🏭 Setting up warehouse auto-check (every ${CHECK_INTERVAL / 60000} minutes)...`);
+  
+  // Run check every X minutes
+  const intervalId = setInterval(() => {
+    checkWarehouseShipments().catch(console.error);
+  }, CHECK_INTERVAL);
+  
+  // Run initial check after 30 seconds
+  setTimeout(() => {
+    console.log('🚀 Running initial warehouse check...');
+    checkWarehouseShipments().catch(console.error);
+  }, 30000);
+  
+  // Store interval ID for cleanup
+  app.locals.warehouseIntervalId = intervalId;
+  
+  return intervalId;
+}
+
+// ✅ MANUAL TRIGGER ENDPOINT
+app.post("/api/warehouse/check-now", async (req, res) => {
+  try {
+    console.log('🚀 Manual warehouse check triggered');
+    
+    await checkWarehouseShipments();
+    
+    res.json({
+      success: true,
+      message: 'Warehouse check completed',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// ✅ GET WAREHOUSE STATUS
+app.get("/api/warehouse/status", (req, res) => {
+  res.json({
+    success: true,
+    status: {
+      autoCheck: process.env.DISABLE_AUTO_CHECK !== 'true',
+      interval: process.env.WAREHOUSE_CHECK_INTERVAL || '30 minutes',
+      lastCheck: new Date().toISOString(),
+      isRunning: isCheckingWarehouse
+    },
+    warehouse: {
+      name: "JustBecho Warehouse",
+      address: "103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001",
+      contact: "Devansh Kothari - 9301847748"
+    },
+    endpoints: {
+      checkNow: "POST /api/warehouse/check-now",
+      triggerOutgoing: "POST /api/razorpay/trigger-outgoing/:awb",
+      dashboard: "GET /api/razorpay/warehouse-dashboard"
+    }
+  });
+});
+
+// ✅ WAREHOUSE INFO ENDPOINT
 app.get("/api/warehouse/info", (req, res) => {
   res.json({
     success: true,
@@ -194,409 +412,90 @@ app.get("/api/warehouse/info", (req, res) => {
     },
     automation: {
       status: "ACTIVE",
+      method: "setInterval (No external dependencies)",
+      interval: process.env.WAREHOUSE_CHECK_INTERVAL || "30 minutes",
       flow: "Seller → Warehouse → Buyer",
-      description: "Automatic two-leg shipment forwarding",
       features: [
-        "✅ Auto-create incoming shipment on payment",
-        "✅ Webhook-based outgoing shipment creation",
+        "✅ Auto-check shipments every 30 minutes",
+        "✅ Auto-create outgoing when delivered to warehouse",
         "✅ Manual trigger available",
         "✅ Real-time tracking",
-        "✅ Dashboard for warehouse management"
-      ],
-      endpoints: {
-        triggerOutgoing: "POST /api/razorpay/trigger-outgoing/:awb",
-        warehouseDashboard: "GET /api/razorpay/warehouse-dashboard",
-        webhook: "POST /api/razorpay/warehouse-webhook"
-      },
-      steps: [
-        "Step 1: Payment → Create shipment (Seller → Warehouse)",
-        "Step 2: When delivered → Auto-create shipment (Warehouse → Buyer)",
-        "Step 3: Track → Complete delivery"
+        "✅ No cron package needed"
       ]
     }
   });
 });
 
-// ✅ WAREHOUSE DASHBOARD ENDPOINT
-app.get("/api/warehouse/dashboard", async (req, res) => {
-  try {
-    // You'll need to import Order model here or create a separate route
-    res.json({
-      success: true,
-      message: "Warehouse dashboard endpoint",
-      note: "Complete dashboard implementation in /api/razorpay/warehouse-dashboard"
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// ✅ WAREHOUSE CRON JOB SETUP
-const setupWarehouseCron = () => {
-  // Run every 30 minutes to check for shipments
-  cron.schedule('*/30 * * * *', async () => {
-    try {
-      console.log('🕐 [CRON] Checking for warehouse shipments...');
-      
-      // Import Order model dynamically
-      const Order = (await import('./models/Order.js')).default;
-      
-      // Find orders with incoming shipments at warehouse
-      const orders = await Order.find({
-        'nimbuspostShipments.shipmentType': 'incoming',
-        'shippingLegs': {
-          $elemMatch: {
-            leg: 'seller_to_warehouse',
-            status: 'completed'
-          }
-        },
-        'nimbuspostShipments': {
-          $not: {
-            $elemMatch: {
-              shipmentType: 'outgoing'
-            }
-          }
-        }
-      });
-      
-      if (orders.length > 0) {
-        console.log(`📦 [CRON] Found ${orders.length} orders at warehouse needing forwarding`);
-        
-        // Here you would trigger the forwarding logic
-        // This is a placeholder - actual implementation in razorpayVerify.js
-        orders.forEach(order => {
-          console.log(`   Order: ${order._id}, Incoming AWB: ${order.nimbuspostShipments
-            .filter(s => s.shipmentType === 'incoming')
-            .map(s => s.awbNumber)}`);
-        });
-      }
-      
-    } catch (error) {
-      console.error('❌ [CRON] Error:', error.message);
-    }
-  });
-  
-  console.log('✅ Warehouse cron job scheduled (every 30 minutes)');
-};
-
 // ✅ RAZORPAY DEBUG ENDPOINTS
 app.get("/api/razorpay/debug", (req, res) => {
-  const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
-  const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
-  const nimbusEmail = process.env.NIMBUSPOST_EMAIL;
-  const nimbusPassword = process.env.NIMBUSPOST_PASSWORD;
-  
-  console.log('🔐 Razorpay Debug Request');
-  console.log('   Key ID exists:', !!keyId);
-  console.log('   Key Secret exists:', !!keySecret);
-  
   res.json({
     success: true,
     razorpay: {
-      keyIdExists: !!keyId,
-      keySecretExists: !!keySecret,
-      keyIdPrefix: keyId ? keyId.substring(0, 10) + '...' : 'none',
-      environment: process.env.NODE_ENV || 'development',
-      timestamp: new Date().toISOString()
+      keyIdExists: !!process.env.RAZORPAY_LIVE_KEY_ID,
+      keySecretExists: !!process.env.RAZORPAY_LIVE_SECRET_KEY,
+      environment: process.env.NODE_ENV || 'development'
     },
     nimbuspost: {
-      emailExists: !!nimbusEmail,
-      passwordExists: !!nimbusPassword,
+      emailExists: !!process.env.NIMBUSPOST_EMAIL,
+      passwordExists: !!process.env.NIMBUSPOST_PASSWORD,
       apiKeyExists: !!process.env.NIMBUSPOST_API_KEY
     },
     warehouse: {
       configured: true,
       name: "JustBecho Warehouse, Indore",
-      address: "103 Dilpasand grand, Behind Rafael tower",
-      contact: "Devansh Kothari - 9301847748",
-      automation: "ENABLED"
-    },
-    server: {
-      name: 'JustBecho API',
-      version: '3.1.0',
-      features: [
-        'Warehouse Automation (Seller→Warehouse→Buyer)',
-        'NimbusPost B2B Shipping',
-        'Two-Leg Logistics',
-        'Order Tracking'
-      ]
+      automation: "ACTIVE (setInterval)",
+      autoCheck: process.env.DISABLE_AUTO_CHECK !== 'true'
     }
   });
 });
 
-// ✅ RAZORPAY TEST ORDER (for debugging - No auth required)
-app.post("/api/razorpay/test-order", async (req, res) => {
-  try {
-    console.log('🧪 Razorpay Test Order Request');
-    
-    // Dynamic import for Razorpay
-    const Razorpay = (await import('razorpay')).default;
-    
-    const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
-    const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
-    
-    console.log('🔐 Test Order - Keys Check:', {
-      keyId: keyId ? 'Present' : 'Missing',
-      keySecret: keySecret ? 'Present' : 'Missing'
-    });
-    
-    if (!keyId || !keySecret) {
-      return res.status(400).json({
-        success: false,
-        message: 'Razorpay keys missing in environment',
-        keys: {
-          RAZORPAY_LIVE_KEY_ID: !!keyId,
-          RAZORPAY_LIVE_SECRET_KEY: !!keySecret
-        }
-      });
-    }
-    
-    const razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret
-    });
-    
-    console.log('📦 Creating test Razorpay order...');
-    
-    const testOrder = await razorpay.orders.create({
-      amount: 100, // ₹1 test (100 paise)
-      currency: 'INR',
-      receipt: `test_${Date.now()}`,
-      payment_capture: 1
-    });
-    
-    console.log('✅ Test Razorpay order created:', testOrder.id);
-    
-    res.json({
-      success: true,
-      message: 'Razorpay test successful',
-      order: {
-        id: testOrder.id,
-        amount: testOrder.amount,
-        currency: testOrder.currency,
-        receipt: testOrder.receipt,
-        status: testOrder.status
-      }
-    });
-  } catch (error) {
-    console.error('❌ Razorpay test error:', error.message);
-    console.error('Error details:', error.error || error);
-    
-    res.status(500).json({
-      success: false,
-      message: 'Razorpay test failed: ' + error.message,
-      error: process.env.NODE_ENV === 'development' ? {
-        message: error.message,
-        code: error.code,
-        details: error.error
-      } : undefined
-    });
-  }
-});
-
-// ✅ NIMBUSPOST CONFIGURATION CHECK
-app.get("/api/nimbuspost/config", (req, res) => {
-  const email = process.env.NIMBUSPOST_EMAIL;
-  const password = process.env.NIMBUSPOST_PASSWORD;
-  const apiKey = process.env.NIMBUSPOST_API_KEY;
-  
-  res.json({
-    success: true,
-    config: {
-      emailExists: !!email,
-      passwordExists: !!password,
-      apiKeyExists: !!apiKey,
-      emailPreview: email ? email.substring(0, 3) + '***' + email.substring(email.indexOf('@')) : 'Not set',
-      apiKeyPreview: apiKey ? apiKey.substring(0, 10) + '...' : 'Not set'
-    },
-    warehouse: {
-      integrated: true,
-      name: "JustBecho Warehouse",
-      automation: "Two-leg shipments enabled"
-    },
-    instructions: [
-      'Set NIMBUSPOST_EMAIL, NIMBUSPOST_PASSWORD, and NIMBUSPOST_API_KEY in .env',
-      'Test connection: GET /api/nimbuspost/test',
-      'Create test shipment: POST /api/nimbuspost/test-shipment'
-    ]
-  });
-});
-
-// ✅ Health check endpoint WITH WAREHOUSE INFO
+// ✅ Health check endpoint
 app.get("/api/health", (req, res) => {
-  const keyId = process.env.RAZORPAY_LIVE_KEY_ID;
-  const keySecret = process.env.RAZORPAY_LIVE_SECRET_KEY;
-  const nimbusEmail = process.env.NIMBUSPOST_EMAIL;
-  const nimbusPassword = process.env.NIMBUSPOST_PASSWORD;
-  
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     services: {
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      razorpay: {
-        configured: !!keyId && !!keySecret,
-        keyIdPresent: !!keyId,
-        keySecretPresent: !!keySecret
-      },
-      nimbuspost: {
-        configured: !!nimbusEmail && !!nimbusPassword,
-        emailPresent: !!nimbusEmail,
-        passwordPresent: !!nimbusPassword
-      },
+      razorpay: !!process.env.RAZORPAY_LIVE_KEY_ID && !!process.env.RAZORPAY_LIVE_SECRET_KEY,
+      nimbuspost: !!process.env.NIMBUSPOST_EMAIL && !!process.env.NIMBUSPOST_PASSWORD,
       cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
-      cors: 'enabled',
-      cronJobs: 'enabled'
+      warehouseAutoCheck: process.env.DISABLE_AUTO_CHECK !== 'true'
     },
-    warehouse: {
-      name: "JustBecho Warehouse",
-      location: "Indore, Madhya Pradesh",
-      address: "103 Dilpasand grand, Behind Rafael tower",
-      contact: "Devansh Kothari - 9301847748",
-      automation: {
-        status: "ACTIVE",
-        flow: "Seller → Warehouse → Buyer",
-        features: [
-          "Auto-shipment creation",
-          "Webhook forwarding",
-          "Manual trigger",
-          "Tracking"
-        ]
-      }
-    },
-    features: [
-      'Warehouse Automation System',
-      'NimbusPost B2B Shipping Integration',
-      'Two-Leg Logistics (Seller→Warehouse→Buyer)',
-      'Razorpay Payment Gateway',
-      'Order Tracking & Management',
-      'Seller & Buyer Dashboards'
-    ]
+    warehouseAutomation: {
+      status: "ACTIVE",
+      method: "setInterval",
+      interval: process.env.WAREHOUSE_CHECK_INTERVAL || "30 minutes",
+      flow: 'seller → warehouse → buyer',
+      lastCheck: new Date().toISOString()
+    }
   });
 });
 
-// ✅ Simple database test
+// ✅ TEST DATABASE
 app.get("/api/test-db", async (req, res) => {
   try {
     const dbState = mongoose.connection.readyState;
-    
-    const states = {
-      0: 'disconnected',
-      1: 'connected',
-      2: 'connecting',
-      3: 'disconnecting'
-    };
+    const states = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
     
     res.json({
       success: true,
       database: states[dbState] || 'unknown',
       readyState: dbState,
       connection: mongoose.connection.host || 'unknown',
-      databaseName: mongoose.connection.name || 'unknown',
-      collections: Object.keys(mongoose.connection.collections) || []
+      databaseName: mongoose.connection.name || 'unknown'
     });
   } catch (error) {
-    res.json({
-      success: false,
-      error: error.message
-    });
+    res.json({ success: false, error: error.message });
   }
 });
 
-// ✅ TEST NIMBUSPOST DIRECT TOKEN
-app.get("/api/test-nimbus-token", async (req, res) => {
-  try {
-    const token = process.env.NIMBUSPOST_API_KEY;
-    
-    if (!token) {
-      return res.json({
-        success: false,
-        message: 'NimbusPost API Key not found in .env file',
-        suggestion: 'Add NIMBUSPOST_API_KEY to your .env file'
-      });
-    }
-    
-    // Try a simple API call to test the token
-    const axios = (await import('axios')).default;
-    
-    const testResponse = await axios.get(
-      'https://ship.nimbuspost.com/api/shipmentcargo/wallet_balance',
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'x-api-key': token
-        }
-      }
-    );
-    
-    res.json({
-      success: true,
-      message: '✅ NimbusPost API Key is working!',
-      tokenPreview: token.substring(0, 30) + '...',
-      walletBalance: testResponse.data.data,
-      status: testResponse.data.status,
-      warehouseNote: 'Warehouse automation will use this token for shipments'
-    });
-    
-  } catch (error) {
-    res.json({
-      success: false,
-      message: '❌ NimbusPost API Key test failed',
-      error: error.response?.data?.message || error.message,
-      tokenLength: process.env.NIMBUSPOST_API_KEY?.length || 0,
-      troubleshooting: [
-        'Check if API key is correct',
-        'Check if API key has proper permissions',
-        'Verify internet connection',
-        'Check NimbusPost dashboard for API status'
-      ]
-    });
-  }
-});
-
-// ✅ WAREHOUSE TEST ENDPOINT
-app.post("/api/warehouse/test-forward", async (req, res) => {
-  try {
-    const { awb } = req.body;
-    
-    if (!awb) {
-      return res.status(400).json({
-        success: false,
-        message: 'AWB number required'
-      });
-    }
-    
-    // This is a test endpoint - actual implementation is in razorpayVerify.js
-    res.json({
-      success: true,
-      message: 'Test endpoint for warehouse forwarding',
-      awb: awb,
-      note: 'Actual forwarding is done via /api/razorpay/trigger-outgoing/:awb',
-      warehouse: {
-        name: "JustBecho Warehouse",
-        action: "Would forward this AWB to buyer"
-      }
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// ✅ API Documentation endpoint
+// ✅ API Documentation
 app.get("/", (req, res) => {
   res.json({ 
     message: "🚀 Just Becho API with Warehouse Automation",
     timestamp: new Date().toISOString(),
-    version: "3.1.0",
+    version: "3.2.0",
     warehouse: {
       name: "JustBecho Warehouse",
       location: "Indore, Madhya Pradesh",
@@ -604,107 +503,80 @@ app.get("/", (req, res) => {
       contact: "Devansh Kothari - 9301847748",
       automation: "Seller → Warehouse → Buyer (Auto)"
     },
+    automation: {
+      method: "setInterval (No external packages)",
+      interval: "Every 30 minutes",
+      endpoints: {
+        checkNow: "POST /api/warehouse/check-now",
+        status: "GET /api/warehouse/status",
+        info: "GET /api/warehouse/info"
+      }
+    },
     features: [
       "Warehouse Automation (Two-Leg Shipments)",
       "NimbusPost B2B Shipping Integration",
       "Razorpay Payment Processing",
       "Order & Shipment Tracking",
-      "Seller & Buyer Dashboards"
+      "Auto-check every 30 minutes"
     ],
     endpoints: {
       auth: "/api/auth",
       products: "/api/products",
-      wishlist: "/api/wishlist",
-      users: "/api/users",
-      categories: "/api/categories",
       cart: "/api/cart",
-      admin: "/api/admin",
-      razorpay: "/api/razorpay",
       orders: "/api/orders",
       shipping: "/api/shipping",
-      nimbuspost: "/api/nimbuspost",
-      warehouse: "/api/warehouse/info",
+      razorpay: "/api/razorpay",
+      warehouse: "/api/warehouse/status",
       health: "/api/health",
-      testDb: "/api/test-db",
-      razorpayDebug: "/api/razorpay/debug",
-      razorpayTest: "/api/razorpay/test-order (POST)",
-      nimbusConfig: "/api/nimbuspost/config",
-      nimbusTokenTest: "/api/test-nimbus-token"
-    },
-    automation: {
-      step1: "Payment → Create Incoming Shipment (Seller→Warehouse)",
-      step2: "When delivered → Auto-create Outgoing (Warehouse→Buyer)",
-      step3: "Tracking → Complete Delivery",
-      manual: "Use /api/razorpay/trigger-outgoing/:awb for manual trigger"
-    },
-    important: {
-      nimbuspost: "Use B2B API Document from NimbusPost dashboard",
-      warehouseAddress: "103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001",
-      contact: "Devansh Kothari - 9301847748"
-    }
-  });
-});
-
-// ✅ WAREHOUSE AUTOMATION STATUS
-app.get("/api/automation/status", (req, res) => {
-  res.json({
-    success: true,
-    automation: {
-      warehouseFlow: "ACTIVE",
-      status: "Running",
-      lastCheck: new Date().toISOString(),
-      components: {
-        incomingShipments: "Auto-create on payment",
-        webhookForwarding: "Enabled via /api/razorpay/warehouse-webhook",
-        manualTrigger: "Available via /api/razorpay/trigger-outgoing/:awb",
-        cronJob: "Scheduled every 30 minutes"
-      },
-      warehouseDetails: {
-        name: "JustBecho Warehouse",
-        pickupAddress: "103 Dilpasand grand, Behind Rafael tower, Indore",
-        pincode: "452001",
-        state: "Madhya Pradesh",
-        contact: "Devansh Kothari - 9301847748"
-      }
+      testDb: "/api/test-db"
     }
   });
 });
 
 // ✅ 404 handler
 app.use((req, res) => {
-  console.log(`❌ 404 - Route not found: ${req.method} ${req.url}`);
   res.status(404).json({ 
     success: false,
     message: `Route ${req.method} ${req.url} not found`,
-    timestamp: new Date().toISOString(),
-    availableEndpoints: [
-      '/api/auth',
-      '/api/products', 
-      '/api/cart',
-      '/api/orders',
-      '/api/shipping',
-      '/api/razorpay',
-      '/api/nimbuspost',
-      '/api/warehouse/info',
-      '/api/health'
-    ]
+    timestamp: new Date().toISOString()
   });
 });
 
 // ✅ Global error handler
 app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
-  console.error('Error stack:', error.stack);
   
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error',
-    timestamp: new Date().toISOString(),
-    ...(process.env.NODE_ENV === 'development' && { 
-      stack: error.stack,
-      details: error 
-    })
+    timestamp: new Date().toISOString()
   });
+});
+
+// ✅ CLEANUP ON EXIT
+process.on('SIGINT', () => {
+  console.log('🔴 Shutting down server...');
+  
+  // Clear warehouse interval
+  if (app.locals.warehouseIntervalId) {
+    clearInterval(app.locals.warehouseIntervalId);
+    console.log('✅ Warehouse auto-check stopped');
+  }
+  
+  mongoose.connection.close();
+  console.log('✅ MongoDB connection closed');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('🔴 Received SIGTERM, shutting down gracefully...');
+  
+  if (app.locals.warehouseIntervalId) {
+    clearInterval(app.locals.warehouseIntervalId);
+  }
+  
+  mongoose.connection.close();
+  process.exit(0);
 });
 
 // ✅ START SERVER
@@ -712,27 +584,30 @@ const startServer = async () => {
   try {
     await connectDB();
     
-    // Setup warehouse cron job
-    setupWarehouseCron();
-    
     const PORT = process.env.PORT || 8000;
+    
+    // Setup warehouse auto-check (only if not disabled)
+    if (process.env.DISABLE_AUTO_CHECK !== 'true') {
+      setupWarehouseAutoCheck();
+    } else {
+      console.log('⚠️  Warehouse auto-check disabled (DISABLE_AUTO_CHECK=true)');
+    }
     
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 3.1.0                  ║
+║                  🚀 JUST BECHO SERVER 3.2.0                  ║
 ║                🏭 WAREHOUSE AUTOMATION ENABLED               ║
 ║                🔄 SELLER → WAREHOUSE → BUYER                 ║
+║                ⏰ AUTO-CHECK WITH SETINTERVAL                ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
   ✅ Environment: ${process.env.NODE_ENV || 'development'}
   ✅ Database: Connected
-  ✅ CORS: Enabled
-  ✅ Razorpay: ${process.env.RAZORPAY_LIVE_KEY_ID ? '✅ Loaded' : '❌ Missing'}
-  ✅ NimbusPost: ${process.env.NIMBUSPOST_EMAIL ? '✅ Configured' : '❌ Not Configured'}
-  ✅ Warehouse: ✅ ACTIVE
+  ✅ Warehouse: JustBecho, Indore
+  ✅ Auto-check: ${process.env.DISABLE_AUTO_CHECK !== 'true' ? '✅ ENABLED' : '❌ DISABLED'}
 
 🏭 WAREHOUSE DETAILS:
   📍 Address: 103 Dilpasand grand, Behind Rafael tower
@@ -740,60 +615,24 @@ const startServer = async () => {
   📮 Pincode: 452001
   👤 Contact: Devansh Kothari
   📞 Phone: 9301847748
-  📧 Email: warehouse@justbecho.com
 
-📦 WAREHOUSE AUTOMATION FLOW:
-  ┌─────────────────────────────────────────────────────┐
-  │ 1. Buyer Payment → Razorpay                         │
-  │ 2. Verify Payment → Create Incoming Shipment        │
-  │    (Seller → Warehouse)                             │
-  │ 3. When Delivered → Auto-create Outgoing Shipment   │
-  │    (Warehouse → Buyer)                              │
-  │ 4. Tracking → Mark Order Delivered                  │
-  └─────────────────────────────────────────────────────┘
+📦 AUTOMATION FLOW:
+  1️⃣ Payment → Create Incoming (Seller → Warehouse)
+  2️⃣ Auto-check every 30 minutes
+  3️⃣ When delivered → Create Outgoing (Warehouse → Buyer)
+  4️⃣ Complete! 🎉
 
-🔧 DEBUG & TEST ENDPOINTS:
-  ✅ /api/warehouse/info - Warehouse details
-  ✅ /api/razorpay/debug - Check Razorpay keys
-  ✅ /api/test-nimbus-token - Test NimbusPost API Key
-  ✅ /api/nimbuspost/config - Check NimbusPost config
+🔄 AUTO-CHECK DETAILS:
+  Method: setInterval (No external packages)
+  Interval: Every ${process.env.WAREHOUSE_CHECK_INTERVAL ? parseInt(process.env.WAREHOUSE_CHECK_INTERVAL) / 60000 + ' minutes' : '30 minutes'}
+  Status: ${isCheckingWarehouse ? 'Running now' : 'Waiting'}
+  Manual Trigger: POST /api/warehouse/check-now
+
+🔧 TEST ENDPOINTS:
+  ✅ /api/warehouse/status - Check automation status
+  ✅ /api/warehouse/check-now - Manual trigger
   ✅ /api/health - Health check
   ✅ /api/test-db - Database test
-
-🔄 AUTOMATION ENDPOINTS:
-  🔔 Webhook: POST /api/razorpay/warehouse-webhook
-  🚀 Manual: POST /api/razorpay/trigger-outgoing/:awb
-  📊 Dashboard: GET /api/razorpay/warehouse-dashboard
-
-📡 AVAILABLE API ENDPOINTS:
-  🔐  Auth:        http://localhost:${PORT}/api/auth
-  🛍️   Products:    http://localhost:${PORT}/api/products
-  ❤️   Wishlist:    http://localhost:${PORT}/api/wishlist
-  👤  Users:       http://localhost:${PORT}/api/users
-  📁  Categories:  http://localhost:${PORT}/api/categories
-  🛒   Cart:        http://localhost:${PORT}/api/cart
-  👑  Admin:       http://localhost:${PORT}/api/admin
-  💳  Razorpay:    http://localhost:${PORT}/api/razorpay
-  📦  Orders:      http://localhost:${PORT}/api/orders
-  🚚  Shipping:    http://localhost:${PORT}/api/shipping
-  📮  NimbusPost:  http://localhost:${PORT}/api/nimbuspost
-  🏭  Warehouse:   http://localhost:${PORT}/api/warehouse/info
-
-🔗 IMPORTANT LINKS:
-  • Warehouse Address: 103 Dilpasand grand, Indore
-  • NimbusPost Dashboard: https://ship.nimbuspost.com
-  • Razorpay Dashboard: https://dashboard.razorpay.com
-  • MongoDB Atlas: https://cloud.mongodb.com
-
-⚠️  CHECK THESE FIRST IF ERRORS:
-  1. .env file has all required variables
-  2. NimbusPost credentials are correct
-  3. Warehouse address is correctly configured
-  4. MongoDB connection is active
-
-🕐 CRON JOBS:
-  • Warehouse Check: Every 30 minutes
-  • Auto-forwarding: When shipment delivered
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. Press Ctrl+C to stop.
