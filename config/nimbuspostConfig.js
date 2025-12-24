@@ -1,9 +1,12 @@
-// config/nimbuspostConfig.js - BOTH LEGS B2C
+// config/nimbuspostConfig.js - UPDATED FOR NEW API
 export const NIMBUSPOST_CONFIG = {
-  // ✅ YOUR API KEY
-  apiKey: 'ccbd48931ea40e234e8b00142ba1d8b60a2e71ae242245',
+  // ✅ Login credentials from your account
+  credentials: {
+    email: 'justbecho+2985@gmail.com',
+    password: 'vRcYE3eZPj'
+  },
   
-  // ✅ B2C API ENDPOINT
+  // ✅ API Endpoints
   baseURL: 'https://api.nimbuspost.com/v1',
   
   // ✅ WAREHOUSE DETAILS
@@ -15,34 +18,28 @@ export const NIMBUSPOST_CONFIG = {
     address: '103 Dilpasand grand, Behind Rafael tower',
     city: 'Indore',
     state: 'Madhya Pradesh',
-    pincode: '452001'
+    pincode: '452001',
+    latitude: '22.7196', // Indore coordinates
+    longitude: '75.8577'
   },
   
-  // ✅ DEFAULT COURIER FOR B2C
-  defaultCourier: 'delhivery',
-  
-  // ✅ SETTINGS
-  shipmentFlow: 'B2C_WAREHOUSE',
-  autoForwardEnabled: true,
+  // ✅ DEFAULT SETTINGS
+  defaultCourier: 'autoship', // Let NimbusPost choose best courier
+  autoPickup: 'yes',
   
   // ✅ B2C SETTINGS
   b2cSettings: {
-    payment_mode: 'prepaid',
+    payment_type: 'prepaid',
     service_type: 'surface',
-    collectable_amount: 0,
-    is_returnable: true,
-    return_days: 7,
-    add_ons: {
-      awb_required: "yes",
-      label_required: "yes"
-    }
+    is_insurance: '0'
   }
 };
 
 export const NIMBUSPOST_ENDPOINTS = {
-  // B2C Endpoints
-  createShipment: '/shipments',
-  trackShipment: '/shipments/track',
+  login: '/users/login',
+  createShipment: '/shipments/hyperlocal', // Using hyperlocal endpoint
+  trackShipment: '/shipments/track/bulk',
   cancelShipment: '/shipments/cancel',
-  generateLabel: '/shipments/label'
+  manifest: '/shipments/manifest',
+  courierList: '/couriers'
 };
