@@ -130,20 +130,29 @@ class NimbusPostService {
     return `JB${type}${timestamp}${random}`; // Format: JBIN12345678ABCD
   }
   
-  // ✅ CREATE B2C SHIPMENT (MAIN METHOD) - FIXED
+  // ✅ CREATE B2C SHIPMENT (MAIN METHOD) - FIXED WITH SUPPORT DETAILS
   async createB2CShipment(shipmentData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating shipment:', shipmentData.order_number);
+      
+      // ✅ CRITICAL FIX: Ensure support details are included
+      const fixedShipmentData = {
+        ...shipmentData,
+        // Add support details if not already present
+        support_email: shipmentData.support_email || 'justbecho@gmail.com',
+        support_phone: shipmentData.support_phone || '7000739393',
+        support_address: shipmentData.support_address || '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001'
+      };
       
       const headers = await this.getAuthHeaders();
       
       console.log('📤 [NIMBUSPOST] Sending to API...');
       console.log('🔐 Auth Method:', headers['api-key'] ? 'API Key' : 'Bearer Token');
-      console.log('📦 Shipment Data:', JSON.stringify(shipmentData, null, 2));
+      console.log('📦 Shipment Data:', JSON.stringify(fixedShipmentData, null, 2));
       
       const response = await axios.post(
         `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
-        shipmentData,
+        fixedShipmentData,
         {
           headers: headers,
           timeout: 30000
@@ -188,7 +197,7 @@ class NimbusPostService {
           const freshHeaders = await this.getAuthHeaders();
           const retryResponse = await axios.post(
             `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
-            shipmentData,
+            fixedShipmentData,
             {
               headers: freshHeaders,
               timeout: 30000
@@ -244,17 +253,17 @@ class NimbusPostService {
       if (typeof sellerAddress === 'string') {
         sellerAddress = {
           street: sellerAddress,
-          city: 'Mumbai',
-          state: 'Maharashtra',
-          pincode: '400001'
+          city: sellerAddress.city || 'Mumbai',
+          state: sellerAddress.state || 'Maharashtra',
+          pincode: sellerAddress.pincode || '400001'
         };
       }
       
       const shipmentData = {
         // ✅ FIXED: Short order number
         order_number: orderNumber,
-        payment_type: 'Prepaid', // ✅ FIXED: Simple string
-        order_amount: productData.price || 100,
+        payment_type: 'Prepaid',
+        order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
@@ -264,20 +273,25 @@ class NimbusPostService {
         discount: 0,
         cod_charges: 0,
         
-        // ✅ FIXED: Simplified pickup (Seller)
+        // ✅ CRITICAL FIX: Support Details (OTP Verified)
+        support_email: 'justbecho@gmail.com',
+        support_phone: '7000739393',
+        support_address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001',
+        
+        // ✅ FIXED: Pickup (Seller)
         pickup: {
           name: sellerData.name || 'Seller',
           phone: sellerData.phone || '9876543210',
-          address: sellerAddress.street || 'Seller Address',
+          address: sellerAddress.street || sellerAddress.address || 'Seller Address',
           city: sellerAddress.city || 'Mumbai',
           state: sellerAddress.state || 'Maharashtra',
           pincode: sellerAddress.pincode || '400001'
         },
         
-        // ✅ FIXED: Simplified consignee (Warehouse)
+        // ✅ FIXED: Consignee (Warehouse) with verified number
         consignee: {
           name: this.WAREHOUSE_DETAILS.name,
-          phone: this.WAREHOUSE_DETAILS.phone,
+          phone: '7000739393', // ✅ Your OTP verified number
           address: this.WAREHOUSE_DETAILS.address,
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
@@ -292,7 +306,7 @@ class NimbusPostService {
         }],
         
         // ✅ FIXED: Courier ID as integer
-        courier_id: this.defaultCourier, // Must be integer (14 for Delhivery)
+        courier_id: this.defaultCourier,
         
         // ✅ FIXED: Simple insurance flag
         is_insurance: false
@@ -327,17 +341,17 @@ class NimbusPostService {
       if (typeof buyerAddress === 'string') {
         buyerAddress = {
           street: buyerAddress,
-          city: 'Delhi',
-          state: 'Delhi',
-          pincode: '110001'
+          city: buyerData.city || 'Delhi',
+          state: buyerData.state || 'Delhi',
+          pincode: buyerData.pincode || '110001'
         };
       }
       
       const shipmentData = {
         // ✅ FIXED: Short order number
         order_number: orderNumber,
-        payment_type: 'Prepaid', // ✅ FIXED: Simple string
-        order_amount: productData.price || 100,
+        payment_type: 'Prepaid',
+        order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
@@ -347,21 +361,26 @@ class NimbusPostService {
         discount: 0,
         cod_charges: 0,
         
-        // ✅ FIXED: Simplified pickup (Warehouse)
+        // ✅ CRITICAL FIX: Support Details (OTP Verified)
+        support_email: 'justbecho@gmail.com',
+        support_phone: '7000739393',
+        support_address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001',
+        
+        // ✅ FIXED: Pickup (Warehouse) with verified number
         pickup: {
           name: this.WAREHOUSE_DETAILS.name,
-          phone: this.WAREHOUSE_DETAILS.phone,
+          phone: '7000739393', // ✅ Your OTP verified number
           address: this.WAREHOUSE_DETAILS.address,
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
           pincode: this.WAREHOUSE_DETAILS.pincode
         },
         
-        // ✅ FIXED: Simplified consignee (Buyer)
+        // ✅ FIXED: Consignee (Buyer)
         consignee: {
           name: buyerData.name || 'Customer',
           phone: buyerData.phone || '9876543210',
-          address: buyerAddress.street || 'Customer Address',
+          address: buyerAddress.street || buyerAddress.address || 'Customer Address',
           city: buyerAddress.city || 'Delhi',
           state: buyerAddress.state || 'Delhi',
           pincode: buyerAddress.pincode || '110001'
@@ -375,7 +394,7 @@ class NimbusPostService {
         }],
         
         // ✅ FIXED: Courier ID as integer
-        courier_id: this.defaultCourier, // Must be integer (14 for Delhivery)
+        courier_id: this.defaultCourier,
         
         // ✅ FIXED: Simple insurance flag
         is_insurance: false
@@ -712,7 +731,12 @@ class NimbusPostService {
       tokenExpiry: this.tokenExpiry,
       hasApiKey: !!this.apiKey,
       defaultCourier: this.defaultCourier,
-      warehouse: this.WAREHOUSE_DETAILS
+      warehouse: this.WAREHOUSE_DETAILS,
+      supportDetails: {
+        email: 'justbecho@gmail.com',
+        phone: '7000739393',
+        address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001'
+      }
     };
   }
   

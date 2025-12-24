@@ -1,4 +1,4 @@
-// server.js - UPDATED WITH FIXED WAREHOUSE AUTOMATION
+// server.js - FIXED WAREHOUSE AUTOMATION
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -163,13 +163,13 @@ app.use("/api/nimbuspost", nimbuspostTestRoutes);
 app.use("/api/warehouse", warehouseRoutes);
 
 // ==============================================
-// ✅ UPDATED B2C WAREHOUSE AUTOMATION SYSTEM
+// ✅ FIXED B2C WAREHOUSE AUTOMATION SYSTEM
 // ==============================================
 
 let isCheckingWarehouse = false;
 let warehouseCheckInterval = null;
 
-// ✅ UPDATED B2C WAREHOUSE CHECK FUNCTION - USES NEW NIMBUSPOST API
+// ✅ FIXED: B2C WAREHOUSE CHECK FUNCTION
 async function checkB2CWarehouseShipments() {
   if (isCheckingWarehouse) {
     console.log('⏳ Warehouse check already in progress, skipping...');
@@ -185,40 +185,31 @@ async function checkB2CWarehouseShipments() {
     const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
     const Product = (await import('./models/Product.js')).default;
     
-    // ✅ FIXED: Find orders with delivered incoming shipments to warehouse
+    // ✅ FIXED QUERY: Find orders with delivered incoming shipments to warehouse
     const orders = await Order.find({
-      'nimbuspostShipments': {
-        $elemMatch: {
-          shipmentType: 'seller_to_warehouse',
-          status: 'delivered', // Only look for DELIVERED shipments
-          awbNumber: { $exists: true, $ne: null },
-          isMock: { $ne: true } // Skip mock shipments
-        }
-      },
-      'nimbuspostShipments': {
-        $not: {
-          $elemMatch: {
-            shipmentType: 'warehouse_to_buyer',
-            parentAWB: { $exists: true } // No outgoing created yet
-          }
-        }
-      },
-      'metadata.autoForwardEnabled': true
+      'nimbuspostShipments.shipmentType': 'seller_to_warehouse',
+      'nimbuspostShipments.status': 'delivered',
+      'nimbuspostShipments.awbNumber': { $exists: true, $ne: null },
+      'nimbuspostShipments.isMock': { $ne: true },
+      $or: [
+        { 'metadata.autoForwardEnabled': true },
+        { 'metadata.autoForwardEnabled': { $exists: false } }
+      ]
     })
     .populate('buyer', 'name email phone address')
     .populate('products', 'productName finalPrice weight dimensions images')
     .populate('user', 'name email phone');
     
-    console.log(`📊 Found ${orders.length} orders with delivered shipments ready for forwarding`);
+    console.log(`📊 Found ${orders.length} orders with delivered shipments to warehouse`);
     
     let forwardedCount = 0;
     let errorCount = 0;
+    let skippedCount = 0;
     
-    // STEP 2: Process each order
+    // Process each order
     for (const order of orders) {
       try {
         console.log(`\n📦 Processing Order: ${order._id}`);
-        console.log(`   📍 Buyer: ${order.buyer?.name || order.user?.name}`);
         
         // Get DELIVERED incoming shipments for this order
         const deliveredShipments = order.nimbuspostShipments.filter(s => 
@@ -232,45 +223,52 @@ async function checkB2CWarehouseShipments() {
         
         for (const shipment of deliveredShipments) {
           try {
-            console.log(`   🔍 Processing delivered AWB: ${shipment.awbNumber}`);
+            console.log(`   🔍 Processing AWB: ${shipment.awbNumber}`);
             
             // Check if outgoing already exists for this incoming
             const existingOutgoing = order.nimbuspostShipments.find(s => 
-              s.parentAWB === shipment.awbNumber && 
-              s.shipmentType === 'warehouse_to_buyer'
+              s.parentAWB === shipment.awbNumber || 
+              (s.shipmentType === 'warehouse_to_buyer' && s.parentAWB === shipment.awbNumber)
             );
             
             if (existingOutgoing) {
               console.log(`   ⚠️  Outgoing already exists: ${existingOutgoing.awbNumber}`);
+              skippedCount++;
               continue;
             }
             
-            // ✅ SHIPMENT IS ALREADY DELIVERED TO WAREHOUSE - CREATE OUTGOING
+            // ✅ SHIPMENT IS DELIVERED TO WAREHOUSE - CREATE OUTGOING
             console.log(`   🚀 Creating Warehouse → Buyer shipment...`);
             
             // Get product
             const product = order.products.find(p => 
-              p._id.toString() === shipment.productId?.toString()
+              shipment.productId && p._id.toString() === shipment.productId.toString()
             ) || order.products[0];
             
             if (!product) {
               console.log(`   ❌ No product found for this shipment`);
+              errorCount++;
               continue;
             }
             
             // Get buyer info
             const buyer = order.buyer || order.user;
-            const buyerAddress = order.shippingAddress || buyer?.address || {
+            const buyerAddress = order.shippingAddress || (buyer?.address ? {
+              street: buyer.address.street || buyer.address || 'Address not provided',
+              city: buyer.address.city || 'City',
+              state: buyer.address.state || 'State',
+              pincode: buyer.address.pincode || '110001'
+            } : {
               street: 'Address not provided',
               city: 'City',
               state: 'State',
               pincode: '110001'
-            };
+            });
             
-            // ✅ UPDATED: Create outgoing shipment using new API format
+            // ✅ Create outgoing shipment
             const outgoingResult = await nimbuspostService.createWarehouseToBuyerB2C(
               {
-                orderId: `${order._id}-${shipment.productId || product._id}`,
+                orderId: `${order._id}-${shipment.productId || product._id}`.substring(0, 50),
                 totalAmount: product.finalPrice || order.totalAmount || 0
               },
               {
@@ -282,15 +280,13 @@ async function checkB2CWarehouseShipments() {
                 quantity: 1
               },
               {
-                name: buyer?.name || 'Customer',
+                name: buyer?.name || order.shippingAddress?.name || 'Customer',
                 phone: buyer?.phone || order.shippingAddress?.phone || '9876543210',
                 email: buyer?.email || '',
                 address: buyerAddress,
                 pincode: buyerAddress.pincode || '110001',
                 city: buyerAddress.city || 'City',
-                state: buyerAddress.state || 'State',
-                latitude: '28.7041', // Default Delhi coordinates
-                longitude: '77.1025'
+                state: buyerAddress.state || 'State'
               }
             );
             
@@ -325,21 +321,23 @@ async function checkB2CWarehouseShipments() {
               });
               
               // Update shipping legs
-              let warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+              let warehouseLeg = order.shippingLegs?.find(l => l.leg === 'seller_to_warehouse');
               if (!warehouseLeg) {
                 warehouseLeg = {
                   leg: 'seller_to_warehouse',
                   awbNumbers: [shipment.awbNumber],
                   status: 'completed',
-                  createdAt: new Date(),
+                  startedAt: new Date(),
                   completedAt: new Date(),
                   notes: 'Shipment delivered to warehouse'
                 };
+                order.shippingLegs = order.shippingLegs || [];
                 order.shippingLegs.push(warehouseLeg);
               } else {
                 warehouseLeg.status = 'completed';
                 warehouseLeg.completedAt = new Date();
                 warehouseLeg.notes = `Delivered & auto-forwarded (${outgoingResult.awbNumber})`;
+                warehouseLeg.awbNumbers = warehouseLeg.awbNumbers || [];
                 if (!warehouseLeg.awbNumbers.includes(shipment.awbNumber)) {
                   warehouseLeg.awbNumbers.push(shipment.awbNumber);
                 }
@@ -357,8 +355,9 @@ async function checkB2CWarehouseShipments() {
               });
               
               // Update order status
-              order.status = 'forwarded';
-              order.forwardedAt = new Date();
+              if (order.status !== 'delivered' && order.status !== 'shipped') {
+                order.status = 'processing';
+              }
               
               // Add timeline entry
               order.timeline = order.timeline || [];
@@ -384,22 +383,21 @@ async function checkB2CWarehouseShipments() {
               // Update product shipping status
               try {
                 await Product.findByIdAndUpdate(product._id, {
-                  shippingStatus: 'forwarded_from_warehouse',
-                  forwardedAt: new Date(),
-                  warehouseAWB: shipment.awbNumber,
-                  buyerAWB: outgoingResult.awbNumber,
-                  isMockForwarded: outgoingResult.isMock || false
+                  $set: {
+                    shippingStatus: 'forwarded_from_warehouse',
+                    forwardedAt: new Date(),
+                    warehouseAWB: shipment.awbNumber,
+                    buyerAWB: outgoingResult.awbNumber,
+                    isMockForwarded: outgoingResult.isMock || false
+                  }
                 });
                 console.log(`   ✅ Product shipping status updated`);
               } catch (productError) {
                 console.log(`   ⚠️  Product update error: ${productError.message}`);
               }
               
-              // Send notification (optional)
-              console.log(`   📢 ${outgoingResult.isMock ? 'MOCK ' : ''}Notification: ${shipment.awbNumber} → ${outgoingResult.awbNumber}`);
-              
             } else {
-              console.log(`   ❌ Failed to create outgoing shipment`);
+              console.log(`   ❌ Failed to create outgoing shipment: ${outgoingResult.message}`);
               errorCount++;
             }
             
@@ -416,12 +414,15 @@ async function checkB2CWarehouseShipments() {
     }
     
     console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED`);
-    console.log(`   📦 Orders processed: ${orders.length}`);
+    console.log(`   📦 Total orders processed: ${orders.length}`);
     console.log(`   🚀 Packages forwarded: ${forwardedCount}`);
+    console.log(`   ⏭️  Already forwarded (skipped): ${skippedCount}`);
     console.log(`   ❌ Errors: ${errorCount}`);
     
     if (forwardedCount > 0) {
       console.log(`   🎉 Successfully auto-forwarded ${forwardedCount} shipments!`);
+    } else if (skippedCount > 0) {
+      console.log(`   ℹ️  ${skippedCount} shipments already forwarded`);
     } else {
       console.log(`   ℹ️  No shipments ready for forwarding`);
     }
@@ -446,12 +447,12 @@ function setupWarehouseAutoCheck() {
   
   console.log(`🏭 Setting up warehouse auto-check (every ${CHECK_INTERVAL / 60000} minutes)...`);
   
-  // Run check immediately after 15 seconds
+  // Run check immediately after 10 seconds
   setTimeout(() => {
-    console.log('🚀 Running initial warehouse check in 15 seconds...');
+    console.log('🚀 Running initial warehouse check in 10 seconds...');
     setTimeout(() => {
       checkB2CWarehouseShipments().catch(console.error);
-    }, 15000);
+    }, 10000);
   }, 1000);
   
   // Run check every X minutes
@@ -464,7 +465,7 @@ function setupWarehouseAutoCheck() {
 }
 
 // ==============================================
-// ✅ UPDATED API ENDPOINTS FOR MANUAL CONTROL
+// ✅ FIXED API ENDPOINTS FOR MANUAL CONTROL
 // ==============================================
 
 // ✅ MANUAL CHECK ENDPOINT
@@ -488,7 +489,7 @@ app.post("/api/warehouse/check-now", async (req, res) => {
   }
 });
 
-// ✅ UPDATED MANUAL FORWARD ENDPOINT
+// ✅ FIXED: MANUAL FORWARD ENDPOINT
 app.post("/api/warehouse/forward/:awb", async (req, res) => {
   try {
     const { awb } = req.params;
@@ -515,22 +516,41 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
     }
     
     const shipment = order.nimbuspostShipments.find(s => s.awbNumber === awb);
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: `Shipment not found for AWB: ${awb}`
+      });
+    }
+    
     const product = order.products.find(p => 
-      p._id.toString() === shipment.productId?.toString()
+      shipment.productId && p._id.toString() === shipment.productId.toString()
     ) || order.products[0];
     
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found for this shipment'
+      });
+    }
+    
     const buyer = order.buyer || order.user;
-    const buyerAddress = order.shippingAddress || buyer?.address || {
+    const buyerAddress = order.shippingAddress || (buyer?.address ? {
+      street: buyer.address.street || buyer.address || 'Address not provided',
+      city: buyer.address.city || 'City',
+      state: buyer.address.state || 'State',
+      pincode: buyer.address.pincode || '110001'
+    } : {
       street: 'Address not provided',
       city: 'City',
       state: 'State',
       pincode: '110001'
-    };
+    });
     
-    // ✅ UPDATED: Create outgoing shipment using new API
+    // Create outgoing shipment
     const outgoingResult = await nimbuspostService.createWarehouseToBuyerB2C(
       {
-        orderId: `MANUAL-${order._id}-${product._id}`,
+        orderId: `MANUAL-${order._id}-${product._id}`.substring(0, 50),
         totalAmount: product.finalPrice || order.totalAmount || 0
       },
       {
@@ -548,9 +568,7 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
         address: buyerAddress,
         pincode: buyerAddress.pincode || '110001',
         city: buyerAddress.city || 'City',
-        state: buyerAddress.state || 'State',
-        latitude: '28.7041',
-        longitude: '77.1025'
+        state: buyerAddress.state || 'State'
       }
     );
     
@@ -581,11 +599,21 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
       });
       
       // Update shipping legs
-      const warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+      let warehouseLeg = order.shippingLegs?.find(l => l.leg === 'seller_to_warehouse');
       if (warehouseLeg) {
         warehouseLeg.status = 'completed';
         warehouseLeg.completedAt = new Date();
         warehouseLeg.notes = `Manually forwarded (${outgoingResult.awbNumber})`;
+      } else {
+        order.shippingLegs = order.shippingLegs || [];
+        order.shippingLegs.push({
+          leg: 'seller_to_warehouse',
+          awbNumbers: [awb],
+          status: 'completed',
+          startedAt: new Date(),
+          completedAt: new Date(),
+          notes: 'Manually forwarded'
+        });
       }
       
       order.shippingLegs.push({
@@ -598,10 +626,11 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
         parentAWB: awb
       });
       
-      order.status = 'forwarded';
-      order.forwardedAt = new Date();
+      if (order.status !== 'delivered' && order.status !== 'shipped') {
+        order.status = 'processing';
+      }
       
-      await order.save();
+      await order.save({ validateBeforeSave: false });
       
       res.json({
         success: true,
@@ -626,207 +655,6 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
-    });
-  }
-});
-
-// ✅ ADDITIONAL ENDPOINT: FORCE FORWARD ALL DELIVERED
-app.post("/api/warehouse/forward-all-delivered", async (req, res) => {
-  try {
-    console.log('🚀 Force forwarding all delivered shipments...');
-    
-    const Order = (await import('./models/Order.js')).default;
-    const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
-    
-    // Find all orders with delivered incoming shipments
-    const orders = await Order.find({
-      'nimbuspostShipments': {
-        $elemMatch: {
-          shipmentType: 'seller_to_warehouse',
-          status: 'delivered'
-        }
-      },
-      'nimbuspostShipments': {
-        $not: {
-          $elemMatch: {
-            shipmentType: 'warehouse_to_buyer',
-            parentAWB: { $exists: true }
-          }
-        }
-      }
-    })
-    .populate('buyer products user')
-    .limit(10); // Limit to 10 for safety
-    
-    console.log(`📦 Found ${orders.length} orders with delivered shipments`);
-    
-    const results = {
-      totalOrders: orders.length,
-      forwarded: 0,
-      errors: 0,
-      details: []
-    };
-    
-    for (const order of orders) {
-      try {
-        const deliveredShipments = order.nimbuspostShipments.filter(s => 
-          s.shipmentType === 'seller_to_warehouse' && s.status === 'delivered'
-        );
-        
-        if (deliveredShipments.length > 0) {
-          // Use the automation function for this order
-          console.log(`Processing order ${order._id} with ${deliveredShipments.length} delivered shipments`);
-          
-          // We'll implement the forwarding logic here
-          // For now, just count
-          results.forwarded += deliveredShipments.length;
-          results.details.push({
-            orderId: order._id,
-            shipments: deliveredShipments.length,
-            status: 'queued'
-          });
-        }
-      } catch (error) {
-        results.errors++;
-        results.details.push({
-          orderId: order._id,
-          error: error.message,
-          status: 'failed'
-        });
-      }
-    }
-    
-    res.json({
-      success: true,
-      message: `Processed ${orders.length} orders`,
-      results: results,
-      nextStep: 'Run /api/warehouse/check-now to actually forward shipments'
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// ✅ GET WAREHOUSE DASHBOARD
-app.get("/api/warehouse/dashboard", async (req, res) => {
-  try {
-    const Order = (await import('./models/Order.js')).default;
-    
-    // Get warehouse stats
-    const atWarehouse = await Order.countDocuments({
-      'nimbuspostShipments': {
-        $elemMatch: {
-          shipmentType: 'seller_to_warehouse',
-          status: 'delivered'
-        }
-      },
-      'nimbuspostShipments': {
-        $not: {
-          $elemMatch: {
-            shipmentType: 'warehouse_to_buyer',
-            parentAWB: { $exists: true }
-          }
-        }
-      }
-    });
-    
-    const pendingForward = await Order.countDocuments({
-      'nimbuspostShipments': {
-        $elemMatch: {
-          shipmentType: 'seller_to_warehouse',
-          status: { $in: ['booked', 'in_transit', 'out_for_delivery'] }
-        }
-      }
-    });
-    
-    const forwardedToday = await Order.countDocuments({
-      forwardedAt: {
-        $gte: new Date(new Date().setHours(0, 0, 0, 0))
-      },
-      status: 'forwarded'
-    });
-    
-    res.json({
-      success: true,
-      dashboard: {
-        warehouseName: "JustBecho Warehouse, Indore",
-        address: "103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001",
-        contact: "Devansh Kothari - 9301847748",
-        stats: {
-          atWarehouse: atWarehouse,
-          pendingForward: pendingForward,
-          forwardedToday: forwardedToday,
-          totalOrders: atWarehouse + pendingForward + forwardedToday
-        },
-        automation: {
-          status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
-          interval: "15 minutes",
-          isRunning: isCheckingWarehouse,
-          lastCheck: new Date().toISOString()
-        },
-        endpoints: {
-          checkNow: "POST /api/warehouse/check-now",
-          forwardAWB: "POST /api/warehouse/forward/:awb",
-          dashboard: "GET /api/warehouse/dashboard",
-          status: "GET /api/warehouse/status"
-        }
-      }
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// ✅ GET WAREHOUSE STATUS
-app.get("/api/warehouse/status", (req, res) => {
-  res.json({
-    success: true,
-    status: {
-      autoCheck: !!warehouseCheckInterval,
-      interval: "15 minutes",
-      isRunning: isCheckingWarehouse,
-      lastCheck: new Date().toISOString()
-    },
-    warehouse: {
-      name: "JustBecho Warehouse",
-      location: "Indore, Madhya Pradesh",
-      address: "103 Dilpasand grand, Behind Rafael tower",
-      pincode: "452001",
-      contact: "Devansh Kothari - 9301847748"
-    },
-    endpoints: {
-      checkNow: "POST /api/warehouse/check-now",
-      manualForward: "POST /api/warehouse/forward/:awb",
-      dashboard: "GET /api/warehouse/dashboard",
-      forwardAll: "POST /api/warehouse/forward-all-delivered"
-    }
-  });
-});
-
-// ==============================================
-// ✅ ADDITIONAL SERVER ENDPOINTS
-// ==============================================
-
-// ✅ TEST NIMBUSPOST CONNECTION
-app.get("/api/test-nimbuspost", async (req, res) => {
-  try {
-    const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
-    
-    const result = await nimbuspostService.testConnection();
-    
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Test failed: ' + error.message
     });
   }
 });
@@ -873,9 +701,7 @@ app.get("/", (req, res) => {
       health: "GET /api/health",
       warehouse: {
         checkNow: "POST /api/warehouse/check-now",
-        status: "GET /api/warehouse/status",
-        dashboard: "GET /api/warehouse/dashboard",
-        manualForward: "POST /api/warehouse/forward/:awb"
+        forward: "POST /api/warehouse/forward/:awb"
       },
       orders: {
         create: "POST /api/razorpay/create-order",
@@ -959,23 +785,13 @@ const startServer = async () => {
 🔧 WAREHOUSE ENDPOINTS:
   POST /api/warehouse/check-now          - Force check now
   POST /api/warehouse/forward/:awb       - Manual forward specific AWB
-  GET  /api/warehouse/status            - Check automation status
-  GET  /api/warehouse/dashboard         - Warehouse dashboard
-  POST /api/warehouse/forward-all-delivered - Forward all delivered
+  GET  /api/health                       - Check server status
 
 📦 SHIPMENT DETAILS:
   📮 Shipment Mode: B2C
   🔄 Flow: Two-leg B2C via Warehouse
   ⚡ Automation: Fully Automatic
   📊 Tracking: Real-time via NimbusPost API
-
-📞 WAREHOUSE CONTACT:
-  📍 Address: 103 Dilpasand grand, Behind Rafael tower
-  🏙️  City: Indore, Madhya Pradesh
-  📮 Pincode: 452001
-  👤 Contact: Devansh Kothari
-  📞 Phone: 9301847748
-  📧 Email: warehouse@justbecho.com
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. B2C Warehouse automation ACTIVE.

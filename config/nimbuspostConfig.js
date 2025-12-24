@@ -16,7 +16,7 @@ const NIMBUSPOST_CONFIG = {
     city: 'Indore',
     state: 'Madhya Pradesh',
     pincode: '452001',
-    phone: '9301847748',
+    phone: '7000739393',
     latitude: '22.7196',
     longitude: '75.8577'
   },
