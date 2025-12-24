@@ -8,7 +8,8 @@ class NimbusPostService {
     this.credentials = NIMBUSPOST_CONFIG.credentials;
     this.apiKey = NIMBUSPOST_CONFIG.apiKey;
     this.WAREHOUSE_DETAILS = NIMBUSPOST_CONFIG.warehouse;
-    this.defaultCourier = 14; // ✅ FIXED: Integer courier ID for Delhivery
+    this.defaultCourier = NIMBUSPOST_CONFIG.defaultCourier;
+    this.autoPickup = NIMBUSPOST_CONFIG.autoPickup;
     this.b2cSettings = NIMBUSPOST_CONFIG.b2cSettings;
     this.authToken = null;
     this.tokenExpiry = null;
@@ -19,7 +20,6 @@ class NimbusPostService {
   // ✅ 1. CORE AUTHENTICATION METHODS
   // ==============================================
   
-  // ✅ LOGIN METHOD - FIXED FOR YOUR CREDENTIALS
   async login() {
     try {
       console.log('🔑 [NIMBUSPOST] Logging in with email:', this.credentials.email);
@@ -40,31 +40,13 @@ class NimbusPostService {
       
       console.log('📦 [NIMBUSPOST] Login Response Status:', response.status);
       
-      // ✅ FIX: Your NimbusPost returns token as STRING in data field
       if (response.data.status === true && response.data.data) {
-        // Token is a JWT string in the data field
         this.authToken = response.data.data;
-        this.tokenExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
+        this.tokenExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
         this.isAuthenticated = true;
         
         console.log('✅ [NIMBUSPOST] Login Successful!');
-        console.log('🔐 Token Type: JWT String');
         console.log('🔐 Token Length:', this.authToken.length);
-        console.log('🔐 Token Preview:', this.authToken.substring(0, 50) + '...');
-        
-        // Verify it's a valid JWT
-        const tokenParts = this.authToken.split('.');
-        if (tokenParts.length === 3) {
-          try {
-            const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-            console.log('🔐 Token Payload:', {
-              user_id: payload.data?.user_id,
-              exp: new Date(payload.exp * 1000).toISOString()
-            });
-          } catch (e) {
-            console.log('⚠️ Could not decode JWT:', e.message);
-          }
-        }
         
         return {
           success: true,
@@ -88,7 +70,6 @@ class NimbusPostService {
     }
   }
   
-  // ✅ GET AUTH HEADERS - SMART METHOD
   async getAuthHeaders() {
     // If we have a valid token, use it
     if (this.authToken && this.tokenExpiry && new Date() < this.tokenExpiry) {
@@ -123,32 +104,40 @@ class NimbusPostService {
   // ✅ 2. SHIPMENT CREATION METHODS
   // ==============================================
   
-  // ✅ GENERATE SHORT ORDER NUMBER (MAX 20 CHARS)
   generateShortOrderNumber(type = 'IN') {
-    const timestamp = Date.now().toString().slice(-8); // Last 8 digits
+    const timestamp = Date.now().toString().slice(-8);
     const random = Math.random().toString(36).substr(2, 4).toUpperCase();
-    return `JB${type}${timestamp}${random}`; // Format: JBIN12345678ABCD
+    return `JB${type}${timestamp}${random}`;
   }
   
-  // ✅ CREATE B2C SHIPMENT (MAIN METHOD) - FIXED WITH SUPPORT DETAILS
+  // ✅ MAIN SHIPMENT CREATION METHOD - FIXED FORMAT
   async createB2CShipment(shipmentData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating shipment:', shipmentData.order_number);
       
-      // ✅ CRITICAL FIX: Ensure support details are included
+      // ✅ CRITICAL: Fix data format before sending
       const fixedShipmentData = {
         ...shipmentData,
-        // Add support details if not already present
+        // Ensure correct format
+        payment_type: shipmentData.payment_type || 'PREPAID',
+        request_auto_pickup: shipmentData.request_auto_pickup || 'yes',
         support_email: shipmentData.support_email || 'justbecho@gmail.com',
         support_phone: shipmentData.support_phone || '7000739393',
         support_address: shipmentData.support_address || '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001'
       };
       
+      // ✅ IMPORTANT: Ensure pickup has warehouse_name
+      if (fixedShipmentData.pickup && !fixedShipmentData.pickup.warehouse_name) {
+        fixedShipmentData.pickup.warehouse_name = 
+          fixedShipmentData.pickup.company || 
+          'JustBecho Warehouse';
+      }
+      
       const headers = await this.getAuthHeaders();
       
       console.log('📤 [NIMBUSPOST] Sending to API...');
       console.log('🔐 Auth Method:', headers['api-key'] ? 'API Key' : 'Bearer Token');
-      console.log('📦 Shipment Data:', JSON.stringify(fixedShipmentData, null, 2));
+      console.log('📦 Shipment Data (Fixed):', JSON.stringify(fixedShipmentData, null, 2));
       
       const response = await axios.post(
         `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
@@ -160,6 +149,7 @@ class NimbusPostService {
       );
       
       console.log('📦 [NIMBUSPOST] Response Status:', response.status);
+      console.log('📦 Response Data:', response.data);
       
       if (response.data.status === true) {
         const data = response.data.data;
@@ -179,49 +169,13 @@ class NimbusPostService {
           trackingUrl: `https://track.nimbuspost.com/track/${data.awb_number}`,
           labelUrl: data.label,
           manifestUrl: data.manifest,
-          estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), // 5 days
+          estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
           isMock: false,
           rawResponse: response.data
         };
       } else {
         console.error('❌ [NIMBUSPOST] Shipment failed:', response.data.message);
-        console.error('❌ Response data:', response.data);
-        
-        // If it's auth error, try with fresh login
-        if (response.data.message?.includes('Token') || response.data.message?.includes('auth')) {
-          console.log('🔄 [NIMBUSPOST] Auth error, clearing token and retrying...');
-          this.authToken = null;
-          this.isAuthenticated = false;
-          
-          // Retry with fresh headers
-          const freshHeaders = await this.getAuthHeaders();
-          const retryResponse = await axios.post(
-            `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
-            fixedShipmentData,
-            {
-              headers: freshHeaders,
-              timeout: 30000
-            }
-          );
-          
-          if (retryResponse.data.status === true) {
-            const retryData = retryResponse.data.data;
-            console.log('✅ [NIMBUSPOST] Retry successful!');
-            return {
-              success: true,
-              awbNumber: retryData.awb_number,
-              shipmentId: retryData.shipment_id,
-              orderId: retryData.order_id,
-              courierName: retryData.courier_name,
-              status: retryData.status,
-              trackingUrl: `https://track.nimbuspost.com/track/${retryData.awb_number}`,
-              labelUrl: retryData.label,
-              isMock: false,
-              isRetry: true,
-              rawResponse: retryResponse.data
-            };
-          }
-        }
+        console.error('❌ Full error:', response.data);
         
         throw new Error(response.data.message || 'Shipment creation failed');
       }
@@ -240,46 +194,46 @@ class NimbusPostService {
     }
   }
   
-  // ✅ CREATE SELLER → WAREHOUSE B2C SHIPMENT - FIXED
+  // ✅ SELLER → WAREHOUSE B2C - COMPLETE FIXED
   async createSellerToWarehouseB2C(orderData, productData, sellerData) {
     try {
       console.log('🏭 [NIMBUSPOST] Creating Seller → Warehouse B2C shipment');
       
-      // ✅ FIXED: Short order number
       const orderNumber = this.generateShortOrderNumber('IN');
       
-      // ✅ FIXED: Parse seller address
+      // Parse seller address
       let sellerAddress = sellerData.address || {};
       if (typeof sellerAddress === 'string') {
         sellerAddress = {
           street: sellerAddress,
-          city: sellerAddress.city || 'Mumbai',
-          state: sellerAddress.state || 'Maharashtra',
-          pincode: sellerAddress.pincode || '400001'
+          city: sellerData.city || 'Mumbai',
+          state: sellerData.state || 'Maharashtra',
+          pincode: sellerData.pincode || '400001'
         };
       }
       
       const shipmentData = {
-        // ✅ FIXED: Short order number
+        // ✅ FIXED: Correct field names and formats
         order_number: orderNumber,
-        payment_type: 'Prepaid',
+        payment_type: 'PREPAID', // ✅ MUST BE UPPERCASE
         order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: true,
+        request_auto_pickup: 'yes', // ✅ MUST BE STRING 'yes' or 'no'
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
         
-        // ✅ CRITICAL FIX: Support Details (OTP Verified)
+        // ✅ REQUIRED: Support details
         support_email: 'justbecho@gmail.com',
         support_phone: '7000739393',
         support_address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001',
         
-        // ✅ FIXED: Pickup (Seller)
+        // ✅ FIXED: Pickup with warehouse_name
         pickup: {
+          warehouse_name: sellerData.company || 'JustBecho Seller', // ✅ REQUIRED FIELD
           name: sellerData.name || 'Seller',
           phone: sellerData.phone || '9876543210',
           address: sellerAddress.street || sellerAddress.address || 'Seller Address',
@@ -288,27 +242,25 @@ class NimbusPostService {
           pincode: sellerAddress.pincode || '400001'
         },
         
-        // ✅ FIXED: Consignee (Warehouse) with verified number
+        // ✅ Consignee (Warehouse)
         consignee: {
           name: this.WAREHOUSE_DETAILS.name,
-          phone: '7000739393', // ✅ Your OTP verified number
+          phone: this.WAREHOUSE_DETAILS.phone,
           address: this.WAREHOUSE_DETAILS.address,
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
           pincode: this.WAREHOUSE_DETAILS.pincode
         },
         
-        // ✅ FIXED: Simple order items
+        // Order items
         order_items: [{
           name: productData.productName || 'Product',
           qty: productData.quantity || 1,
           price: productData.price || 100
         }],
         
-        // ✅ FIXED: Courier ID as integer
+        // Courier
         courier_id: this.defaultCourier,
-        
-        // ✅ FIXED: Simple insurance flag
         is_insurance: false
       };
       
@@ -328,15 +280,14 @@ class NimbusPostService {
     }
   }
   
-  // ✅ CREATE WAREHOUSE → BUYER B2C SHIPMENT - FIXED
+  // ✅ WAREHOUSE → BUYER B2C - COMPLETE FIXED
   async createWarehouseToBuyerB2C(orderData, productData, buyerData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating Warehouse → Buyer B2C shipment');
       
-      // ✅ FIXED: Short order number
       const orderNumber = this.generateShortOrderNumber('OUT');
       
-      // ✅ FIXED: Parse buyer address
+      // Parse buyer address
       let buyerAddress = buyerData.address || {};
       if (typeof buyerAddress === 'string') {
         buyerAddress = {
@@ -348,35 +299,36 @@ class NimbusPostService {
       }
       
       const shipmentData = {
-        // ✅ FIXED: Short order number
+        // ✅ FIXED: Correct field names and formats
         order_number: orderNumber,
-        payment_type: 'Prepaid',
+        payment_type: 'PREPAID', // ✅ MUST BE UPPERCASE
         order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: true,
+        request_auto_pickup: 'yes', // ✅ MUST BE STRING 'yes' or 'no'
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
         
-        // ✅ CRITICAL FIX: Support Details (OTP Verified)
+        // ✅ REQUIRED: Support details
         support_email: 'justbecho@gmail.com',
         support_phone: '7000739393',
         support_address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001',
         
-        // ✅ FIXED: Pickup (Warehouse) with verified number
+        // ✅ FIXED: Pickup with warehouse_name
         pickup: {
+          warehouse_name: this.WAREHOUSE_DETAILS.company, // ✅ REQUIRED FIELD
           name: this.WAREHOUSE_DETAILS.name,
-          phone: '7000739393', // ✅ Your OTP verified number
+          phone: this.WAREHOUSE_DETAILS.phone,
           address: this.WAREHOUSE_DETAILS.address,
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
           pincode: this.WAREHOUSE_DETAILS.pincode
         },
         
-        // ✅ FIXED: Consignee (Buyer)
+        // ✅ Consignee (Buyer)
         consignee: {
           name: buyerData.name || 'Customer',
           phone: buyerData.phone || '9876543210',
@@ -386,17 +338,15 @@ class NimbusPostService {
           pincode: buyerAddress.pincode || '110001'
         },
         
-        // ✅ FIXED: Simple order items
+        // Order items
         order_items: [{
           name: productData.productName || 'Product',
           qty: productData.quantity || 1,
           price: productData.price || 100
         }],
         
-        // ✅ FIXED: Courier ID as integer
+        // Courier
         courier_id: this.defaultCourier,
-        
-        // ✅ FIXED: Simple insurance flag
         is_insurance: false
       };
       
@@ -420,7 +370,6 @@ class NimbusPostService {
   // ✅ 3. TRACKING & MONITORING METHODS
   // ==============================================
   
-  // ✅ TRACK SHIPMENT
   async trackShipment(awbNumber) {
     try {
       console.log(`📡 [NIMBUSPOST] Tracking shipment: ${awbNumber}`);
@@ -449,7 +398,6 @@ class NimbusPostService {
     }
   }
   
-  // ✅ CHECK IF SHIPMENT DELIVERED
   async isB2CShipmentDelivered(awbNumber) {
     try {
       const tracking = await this.trackShipment(awbNumber);
@@ -476,7 +424,6 @@ class NimbusPostService {
     }
   }
   
-  // ✅ GET COURIER LIST - FIXED
   async getCourierList(pincode = '452001') {
     try {
       const headers = await this.getAuthHeaders();
@@ -493,15 +440,6 @@ class NimbusPostService {
         response.data.data.forEach(courier => {
           console.log(`  ${courier.courier_name} - ID: ${courier.courier_id}`);
         });
-        
-        // Find Delhivery
-        const delhivery = response.data.data.find(c => 
-          c.courier_name.toLowerCase().includes('delhivery')
-        );
-        if (delhivery) {
-          console.log(`✅ Found Delhivery: ID = ${delhivery.courier_id}`);
-          this.defaultCourier = delhivery.courier_id;
-        }
       }
       
       return response.data;
@@ -515,7 +453,6 @@ class NimbusPostService {
   // ✅ 4. TEST & DIAGNOSTIC METHODS
   // ==============================================
   
-  // ✅ TEST CONNECTION
   async testConnection() {
     try {
       console.log('🔌 [NIMBUSPOST] Testing connection...');
@@ -540,17 +477,20 @@ class NimbusPostService {
       };
       console.log('✅ API Key:', apiKeyStatus);
       
-      // Test 3: Get courier list to find correct courier ID
-      console.log('\n🌐 Test 3: Testing /couriers endpoint...');
+      // Test 3: Simple endpoint
+      console.log('\n🌐 Test 3: Testing connection...');
       let endpointResult = { success: false };
       try {
-        const courierResult = await this.getCourierList('452001');
+        const headers = await this.getAuthHeaders();
+        const testResponse = await axios.get(
+          `${this.baseURL}/couriers`,
+          { headers, timeout: 5000 }
+        );
         endpointResult = {
-          success: !!courierResult.data,
-          courierCount: courierResult.data?.length || 0,
-          defaultCourierId: this.defaultCourier
+          success: testResponse.status === 200,
+          status: testResponse.status
         };
-        console.log('✅ Couriers:', endpointResult);
+        console.log('✅ Endpoint:', endpointResult);
       } catch (endpointError) {
         endpointResult = {
           success: false,
@@ -571,14 +511,6 @@ class NimbusPostService {
           login: loginResult,
           apiKey: apiKeyStatus,
           endpoint: endpointResult
-        },
-        credentials: {
-          email: this.credentials.email,
-          apiKey: this.apiKey ? '***' + this.apiKey.slice(-6) : 'Not set'
-        },
-        courierInfo: {
-          defaultCourierId: this.defaultCourier,
-          note: 'Ensure courier_id is integer (14 for Delhivery)'
         }
       };
       
@@ -588,82 +520,8 @@ class NimbusPostService {
       return {
         success: false,
         message: 'Connection test failed',
-        error: error.message,
-        credentials: {
-          email: this.credentials.email,
-          password: '***' + (this.credentials.password?.slice(-3) || '')
-        }
+        error: error.message
       };
-    }
-  }
-  
-  // ✅ DIRECT API TEST
-  async directApiTest() {
-    console.log('🧪 [NIMBUSPOST] Direct API test...');
-    
-    // Test 1: Direct login
-    console.log('\n1. Testing direct login...');
-    try {
-      const loginResponse = await axios.post(
-        'https://api.nimbuspost.com/v1/users/login',
-        {
-          email: this.credentials.email,
-          password: this.credentials.password
-        },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 10000
-        }
-      );
-      
-      console.log('✅ Direct login response:', {
-        status: loginResponse.status,
-        dataType: typeof loginResponse.data.data,
-        hasToken: !!loginResponse.data.data
-      });
-      
-      // Test 2: Use that token
-      if (loginResponse.data.data) {
-        console.log('\n2. Testing with received token...');
-        const testHeaders = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${loginResponse.data.data}`
-        };
-        
-        try {
-          const courierResponse = await axios.get(
-            'https://api.nimbuspost.com/v1/couriers',
-            { headers: testHeaders, timeout: 5000 }
-          );
-          console.log('✅ Token works! Status:', courierResponse.status);
-        } catch (tokenError) {
-          console.log('❌ Token error:', tokenError.message);
-        }
-      }
-      
-      // Test 3: Try API key
-      console.log('\n3. Testing API key...');
-      const apiKeyHeaders = {
-        'Content-Type': 'application/json',
-        'api-key': this.apiKey
-      };
-      
-      try {
-        const apiKeyResponse = await axios.get(
-          'https://api.nimbuspost.com/v1/couriers',
-          { headers: apiKeyHeaders, timeout: 5000 }
-        );
-        console.log('✅ API Key works! Status:', apiKeyResponse.status);
-      } catch (apiKeyError) {
-        console.log('❌ API Key error:', apiKeyError.message);
-        console.log('Response:', apiKeyError.response?.data);
-      }
-      
-      return { success: true };
-      
-    } catch (error) {
-      console.error('❌ Direct API test failed:', error.message);
-      return { success: false, error: error.message };
     }
   }
   
@@ -711,7 +569,6 @@ class NimbusPostService {
   // ✅ 6. UTILITY METHODS
   // ==============================================
   
-  // ✅ GET WAREHOUSE INFO
   getWarehouseInfo() {
     return {
       ...this.WAREHOUSE_DETAILS,
@@ -723,7 +580,6 @@ class NimbusPostService {
     };
   }
   
-  // ✅ GET SERVICE STATUS
   getServiceStatus() {
     return {
       isAuthenticated: this.isAuthenticated,
@@ -731,16 +587,10 @@ class NimbusPostService {
       tokenExpiry: this.tokenExpiry,
       hasApiKey: !!this.apiKey,
       defaultCourier: this.defaultCourier,
-      warehouse: this.WAREHOUSE_DETAILS,
-      supportDetails: {
-        email: 'justbecho@gmail.com',
-        phone: '7000739393',
-        address: '103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001'
-      }
+      warehouse: this.WAREHOUSE_DETAILS
     };
   }
   
-  // ✅ CLEAR AUTH (FOR TESTING)
   clearAuth() {
     this.authToken = null;
     this.tokenExpiry = null;
