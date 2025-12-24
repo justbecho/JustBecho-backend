@@ -1,4 +1,4 @@
-// services/nimbuspostService.js - OPTIMIZED WITH BETTER ERROR HANDLING
+// services/nimbuspostService.js - ALL B2C SHIPMENTS
 import axios from 'axios';
 import { NIMBUSPOST_CONFIG, NIMBUSPOST_ENDPOINTS } from '../config/nimbuspostConfig.js';
 
@@ -6,292 +6,231 @@ class NimbusPostService {
   constructor() {
     this.baseURL = NIMBUSPOST_CONFIG.baseURL;
     this.apiKey = NIMBUSPOST_CONFIG.apiKey;
-    this.credentials = NIMBUSPOST_CONFIG.credentials;
-    this.token = null;
-    this.tokenExpiry = null;
-    
-    // ✅ WAREHOUSE DETAILS - HARDCODED (Aapka address)
-    this.WAREHOUSE_DETAILS = {
-      name: "Devansh Kothari",
-      company: "JustBecho Warehouse",
-      address: "103 Dilpasand grand, Behind Rafael tower",
-      city: "Indore",
-      state: "Madhya Pradesh",
-      pincode: "452001",
-      phone: "9301847748",
-      email: "warehouse@justbecho.com"
-    };
+    this.WAREHOUSE_DETAILS = NIMBUSPOST_CONFIG.warehouse;
+    this.defaultCourier = NIMBUSPOST_CONFIG.defaultCourier;
   }
   
-  // ✅ 1. GENERATE TOKEN USING EMAIL/PASSWORD
-  async generateToken() {
+  // ✅ 1. CREATE B2C SHIPMENT (Generic Method)
+  async createB2CShipment(shipmentData) {
     try {
-      console.log('🔐 Generating NimbusPost token...');
+      console.log('🚚 Creating B2C shipment:', shipmentData.order_id);
       
       const response = await axios.post(
-        `${this.baseURL}/users/login`,
+        `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
+        shipmentData,
         {
-          email: this.credentials.email,
-          password: this.credentials.password
-        },
-        {
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            'x-api-key': this.apiKey
+            'Authorization': `Bearer ${this.apiKey}`,
+            'api-key': this.apiKey
           },
-          timeout: 10000 // 10 seconds timeout
+          timeout: 30000
         }
       );
       
-      if (response.data.status && response.data.data) {
-        this.token = response.data.data;
-        this.tokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-        console.log('✅ Token generated successfully');
-        return this.token;
+      console.log('📦 B2C API Response:', response.data);
+      
+      if (response.data.success || response.data.status === 'success') {
+        const data = response.data.data || response.data;
+        
+        return {
+          success: true,
+          awbNumber: data.awb || data.awb_number,
+          shipmentId: data.shipment_id || data.order_id,
+          courierName: data.courier_name || data.courier,
+          status: data.status || 'created',
+          trackingUrl: data.tracking_url || `https://track.nimbuspost.com/track/${data.awb}`,
+          labelUrl: data.label_url || data.label,
+          charges: data.charges || { freight: 0, total: 0 },
+          estimatedDelivery: data.estimated_delivery,
+          rawResponse: response.data
+        };
       } else {
-        throw new Error('Failed to get token: ' + (response.data.message || 'No token in response'));
+        throw new Error(response.data.message || 'B2C shipment failed');
       }
-    } catch (error) {
-      console.error('❌ Token generation error:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data
-      });
-      throw new Error(`Authentication failed: ${error.message}`);
-    }
-  }
-  
-  // ✅ 2. GET VALID TOKEN (with retry)
-  async getToken() {
-    if (this.token && this.tokenExpiry && new Date() < this.tokenExpiry) {
-      return this.token;
-    }
-    return await this.generateToken();
-  }
-  
-  // ✅ 3. CREATE SHIPMENT WITH WAREHOUSE SUPPORT (IMPROVED)
-  async createB2BShipment(orderData, productData, sellerData, buyerData, shipmentType = 'seller_to_warehouse') {
-    try {
-      const token = await this.getToken();
-      
-      console.log(`🚚 Creating ${shipmentType} shipment for order: ${orderData.orderId}`);
-      
-      // ✅ VALIDATE REQUIRED DATA
-      if (!sellerData?.phone && shipmentType === 'seller_to_warehouse') {
-        console.warn('⚠️ Seller phone not provided, using default');
-      }
-      
-      if (!buyerData?.phone && shipmentType === 'warehouse_to_buyer') {
-        console.warn('⚠️ Buyer phone not provided, using default');
-      }
-      
-      // ✅ DETERMINE SOURCE & DESTINATION
-      let pickupDetails, deliveryDetails;
-      
-      if (shipmentType === 'seller_to_warehouse') {
-        // FROM: SELLER, TO: WAREHOUSE
-        pickupDetails = {
-          warehouse_name: sellerData.name || 'Seller',
-          name: sellerData.name || 'Seller',
-          address: sellerData.address?.street || sellerData.address || 'Seller address',
-          address_2: sellerData.address?.street2 || '',
-          city: sellerData.address?.city || 'City',
-          state: sellerData.address?.state || 'State',
-          pincode: sellerData.address?.pincode || '110001',
-          phone: sellerData.phone || '9876543210'
-        };
-        
-        deliveryDetails = {
-          consignee_name: this.WAREHOUSE_DETAILS.name,
-          consignee_company_name: this.WAREHOUSE_DETAILS.company,
-          consignee_phone: this.WAREHOUSE_DETAILS.phone,
-          consignee_email: this.WAREHOUSE_DETAILS.email,
-          consignee_address: this.WAREHOUSE_DETAILS.address,
-          consignee_pincode: this.WAREHOUSE_DETAILS.pincode,
-          consignee_city: this.WAREHOUSE_DETAILS.city,
-          consignee_state: this.WAREHOUSE_DETAILS.state,
-        };
-        
-        console.log('🏭 Creating INCOMING shipment: Seller → Warehouse');
-        
-      } else if (shipmentType === 'warehouse_to_buyer') {
-        // FROM: WAREHOUSE, TO: BUYER
-        pickupDetails = {
-          warehouse_name: this.WAREHOUSE_DETAILS.company,
-          name: this.WAREHOUSE_DETAILS.name,
-          address: this.WAREHOUSE_DETAILS.address,
-          address_2: '',
-          city: this.WAREHOUSE_DETAILS.city,
-          state: this.WAREHOUSE_DETAILS.state,
-          pincode: this.WAREHOUSE_DETAILS.pincode,
-          phone: this.WAREHOUSE_DETAILS.phone
-        };
-        
-        deliveryDetails = {
-          consignee_name: buyerData.name || 'Customer',
-          consignee_company_name: buyerData.name || 'Individual',
-          consignee_phone: buyerData.phone || '9876543210',
-          consignee_email: buyerData.email || '',
-          consignee_address: buyerData.address?.street || buyerData.address || 'Address not provided',
-          consignee_pincode: buyerData.address?.pincode || '110001',
-          consignee_city: buyerData.address?.city || 'City',
-          consignee_state: buyerData.address?.state || 'State',
-        };
-        
-        console.log('🚚 Creating OUTGOING shipment: Warehouse → Buyer');
-      } else {
-        throw new Error(`Invalid shipment type: ${shipmentType}`);
-      }
-      
-      // ✅ SHIPMENT PAYLOAD (OPTIMIZED)
-      const shipmentPayload = {
-        order_id: shipmentType === 'seller_to_warehouse' 
-          ? `JB-IN-${orderData.orderId}`  // IN = Incoming
-          : `JB-OUT-${orderData.orderId}`, // OUT = Outgoing
-        
-        payment_method: 'prepaid',
-        
-        // ✅ DELIVERY DETAILS
-        ...deliveryDetails,
-        consignee_gst_number: '',
-        
-        // ✅ SHIPMENT DETAILS
-        no_of_invoices: 1,
-        no_of_boxes: 1,
-        courier_id: NIMBUSPOST_CONFIG.defaultCourierId || 110, // Default to Delhivery
-        request_auto_pickup: 'yes',
-        
-        // ✅ INVOICE DETAILS
-        invoice: [{
-          invoice_number: shipmentType === 'seller_to_warehouse'
-            ? `INV-IN-${orderData.orderId}`
-            : `INV-OUT-${orderData.orderId}`,
-          invoice_date: new Date().toISOString().split('T')[0],
-          invoice_value: orderData.totalAmount || 0,
-          ebn_number: '',
-          ebn_expiry_date: ''
-        }],
-        
-        // ✅ PICKUP DETAILS
-        pickup: pickupDetails,
-        
-        // ✅ PRODUCT DETAILS
-        products: [{
-          product_name: shipmentType === 'seller_to_warehouse'
-            ? `[INCOMING] ${productData.productName || 'Product'}`
-            : `[OUTGOING] ${productData.productName || 'Product'}`,
-          product_hsn_code: productData.hsnCode || '9999',
-          product_lbh_unit: 'cm',
-          no_of_box: 1,
-          product_tax_per: 0,
-          product_price: productData.price || 0,
-          product_weight_unit: 'gram',
-          product_length: productData.dimensions?.length || 20,
-          product_breadth: productData.dimensions?.breadth || 15,
-          product_height: productData.dimensions?.height || 10,
-          product_weight: productData.weight || 500
-        }]
-      };
-      
-      console.log(`📦 Preparing ${shipmentType} shipment payload...`);
-      
-      // ✅ MAKE API CALL WITH RETRY
-      const maxRetries = 2;
-      let lastError;
-      
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          console.log(`Attempt ${attempt}/${maxRetries} to create shipment...`);
-          
-          const response = await axios.post(
-            `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
-            shipmentPayload,
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-api-key': this.apiKey
-              },
-              timeout: 30000 // 30 seconds timeout
-            }
-          );
-          
-          if (response.data.status) {
-            const shipment = response.data.data;
-            console.log(`✅ ${shipmentType.toUpperCase()} shipment created! AWB: ${shipment.awb_number}`);
-            
-            return {
-              success: true,
-              shipmentType: shipmentType,
-              awbNumber: shipment.awb_number,
-              shipmentId: shipment.shipment_id,
-              orderId: shipment.order_id,
-              labelUrl: shipment.label,
-              manifestUrl: shipment.manifest,
-              courierName: shipment.courier_name,
-              status: shipment.status,
-              trackingUrl: `https://track.nimbuspost.com/track/${shipment.awb_number}`,
-              rawResponse: response.data,
-              warehouse: this.WAREHOUSE_DETAILS
-            };
-          } else {
-            lastError = new Error(response.data.message || 'Shipment creation failed');
-          }
-        } catch (error) {
-          lastError = error;
-          console.warn(`Attempt ${attempt} failed:`, error.message);
-          
-          // Wait before retry (exponential backoff)
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-          }
-        }
-      }
-      
-      // All retries failed
-      throw lastError || new Error('Shipment creation failed after retries');
       
     } catch (error) {
-      console.error(`❌ Create ${shipmentType} shipment error:`, {
+      console.error('❌ B2C Shipment error:', {
         message: error.message,
         response: error.response?.data,
-        status: error.response?.status,
-        orderId: orderData.orderId
+        status: error.response?.status
       });
+      
+      // Fallback to mock for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⚠️ Using mock B2C shipment');
+        return this.createMockB2CShipment(shipmentData);
+      }
+      
       throw error;
     }
   }
   
-  // ✅ 4. CREATE COMPLETE TWO-LEG SHIPMENT (Seller → Warehouse → Buyer)
-  async createCompleteTwoLegShipment(orderData, productData, sellerData, buyerData) {
+  // ✅ 2. CREATE B2C SHIPMENT: SELLER → WAREHOUSE (FIRST LEG)
+  async createSellerToWarehouseB2C(orderData, productData, sellerData) {
     try {
-      console.log('🔄 Creating COMPLETE two-leg shipment flow...');
+      console.log('🏭 Creating B2C: Seller → Warehouse');
       
-      // STEP 1: Create incoming shipment (Seller → Warehouse)
-      const incomingResult = await this.createB2BShipment(
+      const shipmentData = {
+        order_id: `JB-IN-${orderData.orderId}`,
+        
+        // From: Seller
+        pickup_name: sellerData.name || 'Seller',
+        pickup_phone: sellerData.phone || '9876543210',
+        pickup_email: sellerData.email || '',
+        pickup_address: sellerData.address?.street || sellerData.address || 'Seller Address',
+        pickup_city: sellerData.address?.city || sellerData.city || 'City',
+        pickup_state: sellerData.address?.state || sellerData.state || 'State',
+        pickup_pincode: sellerData.address?.pincode || sellerData.pincode || '110001',
+        
+        // To: Warehouse
+        customer_name: this.WAREHOUSE_DETAILS.name,
+        customer_phone: this.WAREHOUSE_DETAILS.phone,
+        customer_email: this.WAREHOUSE_DETAILS.email,
+        customer_address: this.WAREHOUSE_DETAILS.address,
+        customer_city: this.WAREHOUSE_DETAILS.city,
+        customer_state: this.WAREHOUSE_DETAILS.state,
+        customer_pincode: this.WAREHOUSE_DETAILS.pincode,
+        
+        // Shipment Details
+        payment_mode: NIMBUSPOST_CONFIG.b2cSettings.payment_mode,
+        weight: productData.weight || 500,
+        length: productData.dimensions?.length || 20,
+        breadth: productData.dimensions?.breadth || 15,
+        height: productData.dimensions?.height || 10,
+        quantity: productData.quantity || 1,
+        
+        // Product Details
+        product_name: `[TO WAREHOUSE] ${productData.productName || 'Product'}`,
+        product_price: productData.price || 0,
+        sku: `SKU-IN-${productData.productId || Date.now()}`,
+        
+        // Courier
+        courier_name: this.defaultCourier,
+        service_type: NIMBUSPOST_CONFIG.b2cSettings.service_type,
+        collectable_amount: NIMBUSPOST_CONFIG.b2cSettings.collectable_amount,
+        
+        // Additional
+        is_returnable: NIMBUSPOST_CONFIG.b2cSettings.is_returnable,
+        return_days: NIMBUSPOST_CONFIG.b2cSettings.return_days,
+        add_ons: NIMBUSPOST_CONFIG.b2cSettings.add_ons,
+        
+        // Special Notes
+        notes: 'B2C Shipment from Seller to JustBecho Warehouse'
+      };
+      
+      const result = await this.createB2CShipment(shipmentData);
+      
+      return {
+        ...result,
+        shipmentType: 'seller_to_warehouse',
+        direction: 'incoming',
+        warehouse: this.WAREHOUSE_DETAILS
+      };
+      
+    } catch (error) {
+      console.error('❌ Seller→Warehouse B2C error:', error);
+      throw error;
+    }
+  }
+  
+  // ✅ 3. CREATE B2C SHIPMENT: WAREHOUSE → BUYER (SECOND LEG)
+  async createWarehouseToBuyerB2C(orderData, productData, buyerData) {
+    try {
+      console.log('🚚 Creating B2C: Warehouse → Buyer');
+      
+      const shipmentData = {
+        order_id: `JB-OUT-${orderData.orderId}`,
+        
+        // From: Warehouse
+        pickup_name: this.WAREHOUSE_DETAILS.name,
+        pickup_phone: this.WAREHOUSE_DETAILS.phone,
+        pickup_email: this.WAREHOUSE_DETAILS.email,
+        pickup_address: this.WAREHOUSE_DETAILS.address,
+        pickup_city: this.WAREHOUSE_DETAILS.city,
+        pickup_state: this.WAREHOUSE_DETAILS.state,
+        pickup_pincode: this.WAREHOUSE_DETAILS.pincode,
+        
+        // To: Buyer
+        customer_name: buyerData.name || 'Customer',
+        customer_phone: buyerData.phone || '9876543210',
+        customer_email: buyerData.email || '',
+        customer_address: buyerData.address?.street || buyerData.address || 'Customer Address',
+        customer_city: buyerData.address?.city || buyerData.city || 'City',
+        customer_state: buyerData.address?.state || buyerData.state || 'State',
+        customer_pincode: buyerData.address?.pincode || buyerData.pincode || '110001',
+        
+        // Shipment Details
+        payment_mode: NIMBUSPOST_CONFIG.b2cSettings.payment_mode,
+        weight: productData.weight || 500,
+        length: productData.dimensions?.length || 20,
+        breadth: productData.dimensions?.breadth || 15,
+        height: productData.dimensions?.height || 10,
+        quantity: productData.quantity || 1,
+        
+        // Product Details
+        product_name: productData.productName || 'Product',
+        product_price: productData.price || 0,
+        sku: `SKU-OUT-${productData.productId || Date.now()}`,
+        
+        // Courier
+        courier_name: this.defaultCourier,
+        service_type: NIMBUSPOST_CONFIG.b2cSettings.service_type,
+        collectable_amount: NIMBUSPOST_CONFIG.b2cSettings.collectable_amount,
+        
+        // Additional
+        is_returnable: NIMBUSPOST_CONFIG.b2cSettings.is_returnable,
+        return_days: NIMBUSPOST_CONFIG.b2cSettings.return_days,
+        add_ons: NIMBUSPOST_CONFIG.b2cSettings.add_ons,
+        
+        // Special Notes
+        notes: 'B2C Shipment from JustBecho Warehouse to Customer'
+      };
+      
+      const result = await this.createB2CShipment(shipmentData);
+      
+      return {
+        ...result,
+        shipmentType: 'warehouse_to_buyer',
+        direction: 'outgoing',
+        warehouse: this.WAREHOUSE_DETAILS
+      };
+      
+    } catch (error) {
+      console.error('❌ Warehouse→Buyer B2C error:', error);
+      throw error;
+    }
+  }
+  
+  // ✅ 4. CREATE COMPLETE B2C WAREHOUSE FLOW
+  async createCompleteB2CWarehouseFlow(orderData, productData, sellerData, buyerData) {
+    try {
+      console.log('🔄 Starting B2C Warehouse Flow...');
+      
+      // Step 1: Seller → Warehouse
+      console.log('📦 Step 1: Creating Seller → Warehouse B2C shipment');
+      const incomingResult = await this.createSellerToWarehouseB2C(
         orderData,
         productData,
-        sellerData,
-        buyerData,
-        'seller_to_warehouse'
+        sellerData
       );
       
       if (!incomingResult.success) {
-        throw new Error('Failed to create incoming shipment');
+        throw new Error('Failed to create incoming B2C shipment');
       }
       
-      console.log('✅ Step 1 complete: Incoming shipment created', incomingResult.awbNumber);
+      console.log('✅ Step 1 Complete: Incoming B2C shipment created');
       
-      // Return with instructions for next step
+      // Return with monitoring instructions
       return {
         success: true,
-        message: 'Two-leg shipment process started',
+        message: 'B2C Warehouse Flow started successfully',
         incoming: incomingResult,
-        instructions: {
-          step1: '✅ Incoming shipment created (Seller → Warehouse)',
-          step2: '⏳ Monitor incoming shipment for delivery',
-          step3: '🔔 When delivered, call createB2BShipment with shipmentType = "warehouse_to_buyer"',
-          webhook: 'Setup webhook at /api/razorpay/warehouse-webhook for auto-forwarding'
+        flow: {
+          step1: '✅ B2C Seller → Warehouse created',
+          step2: '⏳ Monitoring delivery to warehouse',
+          step3: '🔔 Auto-create Warehouse → Buyer when delivered',
+          automation: 'Auto-forwarding enabled'
         },
         tracking: {
           incomingAWB: incomingResult.awbNumber,
@@ -301,200 +240,161 @@ class NimbusPostService {
       };
       
     } catch (error) {
-      console.error('❌ Two-leg shipment error:', error);
+      console.error('❌ B2C Warehouse Flow error:', error);
       throw error;
     }
   }
   
-  // ✅ 5. TRACK SHIPMENT (with caching)
-  async trackShipment(awbNumber) {
+  // ✅ 5. TRACK B2C SHIPMENT
+  async trackB2CShipment(awbNumber) {
     try {
-      const token = await this.getToken();
-      
       const response = await axios.get(
         `${this.baseURL}${NIMBUSPOST_ENDPOINTS.trackShipment}/${awbNumber}`,
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': this.apiKey,
+            'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
-          },
-          timeout: 10000
+          }
         }
       );
       
-      if (response.data.status) {
-        return {
-          success: true,
-          awb: awbNumber,
-          data: response.data.data,
-          status: response.data.data.current_status || 'unknown',
-          timestamp: new Date()
-        };
+      if (response.data.success || response.data.status === 'success') {
+        return response.data.data || response.data;
       } else {
         throw new Error(response.data.message || 'Tracking failed');
       }
     } catch (error) {
-      console.error('❌ Track error for AWB', awbNumber, ':', error.message);
+      console.error('❌ B2C Track error:', error.message);
+      
+      // Mock tracking for development
+      if (process.env.NODE_ENV === 'development') {
+        return {
+          awb: awbNumber,
+          status: 'in_transit',
+          current_status: 'In Transit',
+          tracking: [
+            {
+              date: new Date().toISOString(),
+              status: 'In Transit',
+              location: 'Warehouse Hub',
+              remarks: 'Package is in transit'
+            }
+          ]
+        };
+      }
+      
       throw error;
     }
   }
   
-  // ✅ 6. CHECK IF SHIPMENT DELIVERED (SPECIAL FUNCTION FOR AUTOMATION)
-  async isShipmentDelivered(awbNumber) {
+  // ✅ 6. CHECK IF DELIVERED (For automation)
+  async isB2CShipmentDelivered(awbNumber) {
     try {
-      const tracking = await this.trackShipment(awbNumber);
+      const tracking = await this.trackB2CShipment(awbNumber);
       
-      if (tracking.success) {
-        const isDelivered = tracking.status === 'Delivered';
-        console.log(`📦 AWB ${awbNumber} status: ${tracking.status}, Delivered: ${isDelivered}`);
-        
-        return {
-          delivered: isDelivered,
-          status: tracking.status,
-          data: tracking.data,
-          timestamp: tracking.timestamp
-        };
-      }
+      const isDelivered = tracking.status === 'delivered' || 
+                         tracking.current_status === 'Delivered' ||
+                         (tracking.tracking && 
+                          tracking.tracking.some(t => t.status === 'Delivered'));
       
-      return { delivered: false, status: 'unknown', error: 'Tracking failed' };
+      console.log(`📦 AWB ${awbNumber}: ${tracking.status || tracking.current_status}, Delivered: ${isDelivered}`);
+      
+      return {
+        delivered: isDelivered,
+        status: tracking.status || tracking.current_status,
+        data: tracking,
+        timestamp: new Date()
+      };
     } catch (error) {
       console.error('❌ Delivery check error:', error.message);
-      return { delivered: false, status: 'error', error: error.message };
+      return { 
+        delivered: false, 
+        status: 'error', 
+        error: error.message 
+      };
     }
   }
   
-  // ✅ 7. CANCEL SHIPMENT
-  async cancelShipment(awbNumber) {
-    try {
-      const token = await this.getToken();
-      
-      const response = await axios.post(
-        `${this.baseURL}${NIMBUSPOST_ENDPOINTS.cancelShipment}`,
-        { awb: awbNumber },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': this.apiKey,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (response.data.status) {
-        return { 
-          success: true, 
-          message: response.data.message,
-          awb: awbNumber
-        };
-      } else {
-        throw new Error(response.data.message || 'Cancellation failed');
-      }
-    } catch (error) {
-      console.error('❌ Cancel error:', error.message);
-      throw error;
-    }
-  }
-  
-  // ✅ 8. CHECK WALLET BALANCE
-  async checkWalletBalance() {
-    try {
-      const token = await this.getToken();
-      
-      const response = await axios.get(
-        `${this.baseURL}${NIMBUSPOST_ENDPOINTS.walletBalance}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': this.apiKey,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (response.data.status) {
-        return {
-          success: true,
-          balance: response.data.data,
-          available_limit: response.data.data?.available_limit || 0,
-          timestamp: new Date()
-        };
-      } else {
-        throw new Error(response.data.message || 'Balance check failed');
-      }
-    } catch (error) {
-      console.error('❌ Balance error:', error.message);
-      throw error;
-    }
-  }
-  
-  // ✅ 9. GET WAREHOUSE DETAILS (Public method)
-  getWarehouseDetails() {
+  // ✅ 7. MOCK B2C SHIPMENT (Development only)
+  createMockB2CShipment(shipmentData) {
+    const awb = `MOCK${Date.now()}`;
     return {
-      ...this.WAREHOUSE_DETAILS,
-      automation: {
-        incoming_shipment: 'seller_to_warehouse',
-        outgoing_shipment: 'warehouse_to_buyer',
-        flow: 'Seller → Warehouse → Buyer'
-      }
+      success: true,
+      awbNumber: awb,
+      shipmentId: `mock-${awb}`,
+      courierName: 'Delhivery',
+      status: 'created',
+      trackingUrl: `https://track.nimbuspost.com/track/${awb}`,
+      labelUrl: `https://labels.nimbuspost.com/${awb}.pdf`,
+      charges: { freight: 45, total: 45 },
+      estimatedDelivery: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      isMock: true,
+      notes: 'Mock B2C shipment for development'
     };
   }
   
-  // ✅ 10. TEST CONNECTION (Enhanced)
-  async testConnection() {
+  // ✅ 8. TEST B2C CONNECTION
+  async testB2CConnection() {
     try {
-      const token = await this.getToken();
-      const balance = await this.checkWalletBalance();
+      // Try to create a test shipment
+      const testPayload = {
+        order_id: `TEST-${Date.now()}`,
+        pickup_name: 'Test Seller',
+        pickup_phone: '9876543210',
+        pickup_address: 'Test Address',
+        pickup_city: 'Test City',
+        pickup_state: 'Test State',
+        pickup_pincode: '110001',
+        customer_name: 'Test Customer',
+        customer_phone: '9876543211',
+        customer_address: 'Test Customer Address',
+        customer_city: 'Test City',
+        customer_state: 'Test State',
+        customer_pincode: '110002',
+        payment_mode: 'prepaid',
+        weight: 500,
+        product_name: 'Test Product',
+        product_price: 100,
+        courier_name: 'delhivery'
+      };
+      
+      const response = await axios.post(
+        `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
+        testPayload,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`
+          }
+        }
+      );
       
       return {
         success: true,
-        message: '✅ NimbusPost connection successful!',
-        token: token ? token.substring(0, 30) + '...' : 'No token',
-        walletBalance: balance?.available_limit || 0,
-        email: this.credentials.email,
+        message: '✅ B2C API Connected Successfully!',
+        apiStatus: 'connected',
         warehouse: this.WAREHOUSE_DETAILS,
-        apiStatus: 'Connected',
-        timestamp: new Date()
+        testResponse: response.data
       };
     } catch (error) {
       return {
         success: false,
-        message: '❌ Connection failed: ' + error.message,
-        warehouse: this.WAREHOUSE_DETAILS,
-        apiStatus: 'Disconnected',
-        timestamp: new Date()
+        message: '❌ B2C API Connection Failed: ' + error.message,
+        apiStatus: 'disconnected',
+        warehouse: this.WAREHOUSE_DETAILS
       };
     }
   }
   
-  // ✅ 11. BULK SHIPMENT CREATION (For multiple products)
-  async createBulkShipments(orders) {
-    const results = [];
-    
-    for (const order of orders) {
-      try {
-        const result = await this.createB2BShipment(
-          order.orderData,
-          order.productData,
-          order.sellerData,
-          order.buyerData,
-          order.shipmentType || 'seller_to_warehouse'
-        );
-        results.push({ success: true, ...result });
-      } catch (error) {
-        results.push({
-          success: false,
-          error: error.message,
-          orderId: order.orderData.orderId
-        });
-      }
-    }
-    
+  // ✅ 9. GET WAREHOUSE INFO
+  getWarehouseInfo() {
     return {
-      total: orders.length,
-      successful: results.filter(r => r.success).length,
-      failed: results.filter(r => !r.success).length,
-      results: results
+      ...this.WAREHOUSE_DETAILS,
+      flow: 'B2C Warehouse Flow',
+      steps: [
+        'Step 1: Seller → Warehouse (B2C)',
+        'Step 2: Warehouse → Buyer (B2C)',
+        'Automation: Auto-forward when delivered'
+      ]
     };
   }
 }

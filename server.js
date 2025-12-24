@@ -1,4 +1,4 @@
-// server.js - COMPLETE WORKING VERSION WITH AUTO WAREHOUSE → BUYER
+// server.js - COMPLETE UPDATED VERSION WITH B2C WAREHOUSE FLOW
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -12,13 +12,14 @@ dotenv.config();
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║           🚀 JUST BECHO SERVER - WAREHOUSE AUTOMATION        ║
-║                📦 SELLER → WAREHOUSE → BUYER                 ║
-║              ⚡ AUTO-FORWARD WHEN DELIVERED                  ║
+║           🚀 JUST BECHO SERVER - B2C WAREHOUSE FLOW         ║
+║          📦 B2C: SELLER → WAREHOUSE → BUYER (B2C)          ║
+║           ⚡ AUTO-FORWARD WHEN DELIVERED TO WAREHOUSE       ║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 
 console.log('🏭 Warehouse: JustBecho Warehouse, Indore');
+console.log('🚚 Shipment Type: B2C for both legs');
 
 // Hardcode Telegram Token if needed
 if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -170,19 +171,19 @@ app.use("/api/shipping", shippingRoutes);
 app.use("/api/nimbuspost", nimbuspostTestRoutes);
 app.use("/api/warehouse", warehouseRoutes);
 
-// ✅ WAREHOUSE AUTOMATION SYSTEM
+// ✅ B2C WAREHOUSE AUTOMATION SYSTEM
 let isCheckingWarehouse = false;
 let warehouseCheckInterval = null;
 
-// ✅ WAREHOUSE CHECK FUNCTION - COMPLETE WORKING VERSION
-async function checkWarehouseShipments() {
+// ✅ B2C WAREHOUSE CHECK FUNCTION - UPDATED FOR B2C FLOW
+async function checkB2CWarehouseShipments() {
   if (isCheckingWarehouse) {
     console.log('⏳ Warehouse check already in progress, skipping...');
     return;
   }
   
   isCheckingWarehouse = true;
-  console.log('🕐 [WAREHOUSE] ========== STARTING AUTO CHECK ==========');
+  console.log('\n🕐 [B2C WAREHOUSE] ========== STARTING AUTO CHECK ==========');
   
   try {
     // Dynamically import to avoid circular dependencies
@@ -190,140 +191,177 @@ async function checkWarehouseShipments() {
     const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
     const User = (await import('./models/User.js')).default;
     
-    // STEP 1: Find all orders with incoming shipments that might be at warehouse
+    // STEP 1: Find all orders with B2C incoming shipments to warehouse
     const orders = await Order.find({
       'nimbuspostShipments': {
         $elemMatch: {
-          shipmentType: 'incoming',
+          shipmentType: 'seller_to_warehouse',
+          shipmentMode: 'B2C',
+          status: { $nin: ['cancelled', 'failed', 'delivered'] },
           awbNumber: { $exists: true, $ne: null }
         }
       },
-      $or: [
-        { 'shippingLegs.leg': 'seller_to_warehouse', 'shippingLegs.status': 'pending' },
-        { 'shippingLegs.leg': 'seller_to_warehouse', 'shippingLegs.status': 'in_transit' },
-        { 'shippingLegs': { $size: 0 } }
-      ]
+      'shippingLegs': {
+        $elemMatch: {
+          leg: 'seller_to_warehouse',
+          status: { $in: ['pending', 'in_transit'] }
+        }
+      },
+      'shippingLegs': {
+        $not: {
+          $elemMatch: {
+            leg: 'warehouse_to_buyer',
+            status: { $in: ['completed', 'in_transit'] }
+          }
+        }
+      }
     })
-    .populate('buyer', 'name phone email')
+    .populate('buyer', 'name phone email address city state pincode')
     .populate('user', 'name phone email address')
-    .populate('products', 'productName weight finalPrice images');
+    .populate('products', 'productName brand weight finalPrice images dimensions');
     
-    console.log(`📊 Found ${orders.length} orders to check`);
+    console.log(`📊 Found ${orders.length} orders with B2C incoming shipments to check`);
     
     let forwardedCount = 0;
+    let deliveredCount = 0;
     let errorCount = 0;
     
     // STEP 2: Process each order
     for (const order of orders) {
       try {
         console.log(`\n📦 Processing Order: ${order._id}`);
+        console.log(`   📍 Buyer: ${order.buyer?.name || order.user?.name}`);
         
-        // Get all incoming shipments for this order
+        // Get B2C incoming shipments for this order
         const incomingShipments = order.nimbuspostShipments.filter(s => 
-          s.shipmentType === 'incoming' && s.awbNumber && !s.error
+          s.shipmentType === 'seller_to_warehouse' && 
+          s.shipmentMode === 'B2C' && 
+          s.awbNumber && 
+          !s.error
         );
         
-        console.log(`   📬 Found ${incomingShipments.length} incoming shipments`);
+        console.log(`   📬 Found ${incomingShipments.length} B2C incoming shipments`);
         
         for (const shipment of incomingShipments) {
           try {
-            console.log(`   🔍 Checking AWB: ${shipment.awbNumber}`);
+            console.log(`   🔍 Checking B2C AWB: ${shipment.awbNumber}`);
             
-            // Check if outgoing already exists for this incoming
+            // Check if outgoing B2C already exists for this incoming
             const existingOutgoing = order.nimbuspostShipments.find(s => 
-              s.parentAWB === shipment.awbNumber && s.shipmentType === 'outgoing'
+              s.parentAWB === shipment.awbNumber && 
+              s.shipmentType === 'warehouse_to_buyer' &&
+              s.shipmentMode === 'B2C'
             );
             
             if (existingOutgoing) {
-              console.log(`   ⚠️  Outgoing already exists: ${existingOutgoing.awbNumber}`);
+              console.log(`   ⚠️  B2C Outgoing already exists: ${existingOutgoing.awbNumber}`);
               continue;
             }
             
-            // ✅ CRITICAL: Check if shipment is DELIVERED to warehouse
-            console.log(`   📞 Checking delivery status for ${shipment.awbNumber}...`);
-            const tracking = await nimbuspostService.trackShipment(shipment.awbNumber);
+            // ✅ CRITICAL: Check if B2C shipment is DELIVERED to warehouse
+            console.log(`   📞 Checking B2C delivery status for ${shipment.awbNumber}...`);
             
-            const isDelivered = tracking?.current_status === 'Delivered' || 
-                               tracking?.status === 'Delivered' ||
+            let tracking;
+            try {
+              tracking = await nimbuspostService.trackB2CShipment(shipment.awbNumber);
+            } catch (trackError) {
+              console.log(`   ❌ Tracking error: ${trackError.message}`);
+              
+              // Try with regular track method
+              try {
+                tracking = await nimbuspostService.trackShipment(shipment.awbNumber);
+              } catch (error) {
+                console.log(`   ❌ Both tracking methods failed`);
+                continue;
+              }
+            }
+            
+            const isDelivered = tracking?.status === 'delivered' || 
+                               tracking?.current_status === 'Delivered' ||
                                (tracking?.tracking && Array.isArray(tracking.tracking) && 
-                                tracking.tracking.some(t => t.status === 'Delivered'));
+                                tracking.tracking.some(t => t.status === 'Delivered')) ||
+                               tracking?.data?.status === 'delivered';
             
-            console.log(`   📦 Status: ${tracking?.current_status || tracking?.status || 'Unknown'}, Delivered: ${isDelivered}`);
+            console.log(`   📦 B2C Status: ${tracking?.current_status || tracking?.status || 'Unknown'}, Delivered: ${isDelivered}`);
             
-            if (!isDelivered) {
+            if (isDelivered) {
+              deliveredCount++;
+              console.log(`   🎉 B2C SHIPMENT DELIVERED TO WAREHOUSE!`);
+            } else {
               console.log(`   ⏳ Not delivered yet, skipping...`);
               continue;
             }
             
-            // ✅ SHIPMENT IS DELIVERED TO WAREHOUSE - CREATE OUTGOING
-            console.log(`   🎉 SHIPMENT DELIVERED! Creating outgoing...`);
+            // ✅ B2C SHIPMENT IS DELIVERED TO WAREHOUSE - CREATE B2C OUTGOING
+            console.log(`   🚀 Creating B2C: Warehouse → Buyer...`);
             
             // Get product
             const product = order.products.find(p => 
               p._id.toString() === shipment.productId?.toString()
             ) || order.products[0];
             
+            if (!product) {
+              console.log(`   ❌ No product found for this shipment`);
+              continue;
+            }
+            
             // Get buyer info
-            const buyer = order.buyer || order.user || { 
-              name: 'Customer', 
-              phone: '9876543210',
-              address: order.shippingAddress || 'Address not provided'
+            const buyer = order.buyer || order.user;
+            const buyerAddress = order.shippingAddress || buyer?.address || {
+              street: 'Address not provided',
+              city: 'City',
+              state: 'State',
+              pincode: '110001'
             };
             
-            // Prepare buyer address
-            let buyerAddress = buyer.address;
-            if (!buyerAddress && order.shippingAddress) {
-              buyerAddress = order.shippingAddress;
-            }
-            if (!buyerAddress && typeof buyer === 'object') {
-              buyerAddress = {
-                street: buyer.street || 'Address not provided',
-                city: buyer.city || 'City',
-                state: buyer.state || 'State',
-                pincode: buyer.pincode || '110001'
-              };
-            }
-            
-            // Create outgoing shipment
-            console.log(`   🚀 Creating warehouse → buyer shipment...`);
-            
-            const outgoingResult = await nimbuspostService.createB2BShipment(
+            // Create B2C outgoing shipment
+            const outgoingResult = await nimbuspostService.createWarehouseToBuyerB2C(
               {
-                orderId: `${order._id}-${shipment.productId || 'OUT'}`,
-                totalAmount: order.totalAmount || product?.finalPrice || 0
+                orderId: `JB-OUT-${order._id}-${shipment.productId || product._id}`,
+                totalAmount: product.finalPrice || order.totalAmount || 0
               },
               {
-                productName: product?.productName || 'Product',
-                price: product?.finalPrice || 0,
-                weight: product?.weight || 500,
-                dimensions: { length: 20, breadth: 15, height: 10 }
+                productName: product.productName || 'Product',
+                price: product.finalPrice || 0,
+                weight: product.weight || 500,
+                dimensions: product.dimensions || { length: 20, breadth: 15, height: 10 },
+                productId: shipment.productId || product._id
               },
-              nimbuspostService.WAREHOUSE_DETAILS, // Pickup from warehouse
               {
-                name: buyer.name || 'Customer',
-                phone: buyer.phone || '9876543210',
-                email: buyer.email || '',
-                address: buyerAddress
-              },
-              'warehouse_to_buyer'
+                name: buyer?.name || 'Customer',
+                phone: buyer?.phone || order.shippingAddress?.phone || '9876543210',
+                email: buyer?.email || '',
+                address: buyerAddress,
+                pincode: buyerAddress.pincode || '110001',
+                city: buyerAddress.city || 'City',
+                state: buyerAddress.state || 'State'
+              }
             );
             
             if (outgoingResult.success) {
-              console.log(`   ✅ Outgoing created: ${outgoingResult.awbNumber}`);
+              console.log(`   ✅ B2C Outgoing created: ${outgoingResult.awbNumber} via ${outgoingResult.courierName}`);
               
-              // Update order with outgoing shipment
+              // Update order with B2C outgoing shipment
               order.nimbuspostShipments.push({
-                productId: shipment.productId || product?._id,
+                productId: shipment.productId || product._id,
                 awbNumber: outgoingResult.awbNumber,
                 shipmentId: outgoingResult.shipmentId,
-                shipmentType: 'outgoing',
+                shipmentMode: 'B2C',
+                shipmentType: 'warehouse_to_buyer',
                 parentAWB: shipment.awbNumber,
                 status: 'booked',
                 createdAt: new Date(),
                 trackingUrl: outgoingResult.trackingUrl,
                 labelUrl: outgoingResult.labelUrl,
                 courierName: outgoingResult.courierName,
-                notes: 'Auto-created when incoming delivered to warehouse'
+                shipmentDetails: {
+                  weight: product.weight || 500,
+                  charges: outgoingResult.charges || { freight: 0, total: 0 },
+                  estimatedDelivery: outgoingResult.estimatedDelivery
+                },
+                notes: 'Auto-created B2C when incoming delivered to warehouse',
+                direction: 'outgoing',
+                warehouseDetails: nimbuspostService.getWarehouseInfo()
               });
               
               // Update shipping legs
@@ -334,41 +372,47 @@ async function checkWarehouseShipments() {
                   awbNumbers: [shipment.awbNumber],
                   status: 'completed',
                   createdAt: new Date(),
-                  completedAt: new Date()
+                  completedAt: new Date(),
+                  notes: 'B2C shipment delivered to warehouse'
                 };
                 order.shippingLegs.push(warehouseLeg);
               } else {
                 warehouseLeg.status = 'completed';
                 warehouseLeg.completedAt = new Date();
+                warehouseLeg.notes = `B2C delivered & auto-forwarded (${outgoingResult.awbNumber})`;
                 if (!warehouseLeg.awbNumbers.includes(shipment.awbNumber)) {
                   warehouseLeg.awbNumbers.push(shipment.awbNumber);
                 }
-                warehouseLeg.notes = `Delivered & auto-forwarded (${outgoingResult.awbNumber})`;
               }
               
-              // Add outgoing leg
-              const outgoingLeg = order.shippingLegs.find(l => l.leg === 'warehouse_to_buyer');
-              if (!outgoingLeg) {
-                order.shippingLegs.push({
-                  leg: 'warehouse_to_buyer',
-                  awbNumbers: [outgoingResult.awbNumber],
-                  status: 'pending',
-                  createdAt: new Date(),
-                  notes: 'Auto-created: Warehouse → Buyer'
-                });
-              } else {
-                if (!outgoingLeg.awbNumbers.includes(outgoingResult.awbNumber)) {
-                  outgoingLeg.awbNumbers.push(outgoingResult.awbNumber);
-                }
-                outgoingLeg.status = 'pending';
-              }
+              // Add B2C outgoing leg
+              order.shippingLegs.push({
+                leg: 'warehouse_to_buyer',
+                awbNumbers: [outgoingResult.awbNumber],
+                status: 'pending',
+                startedAt: new Date(),
+                courierName: outgoingResult.courierName,
+                notes: 'Auto-created B2C: Warehouse → Buyer',
+                parentAWB: shipment.awbNumber
+              });
               
               // Update order status
-              order.status = 'processing';
-              order.notes = order.notes || [];
-              order.notes.push({
-                note: `Package forwarded from warehouse to buyer. Outgoing AWB: ${outgoingResult.awbNumber}`,
-                createdAt: new Date()
+              order.status = 'forwarded';
+              order.forwardedAt = new Date();
+              
+              // Add timeline entry
+              order.timeline = order.timeline || [];
+              order.timeline.push({
+                event: 'b2c_auto_forwarded',
+                description: `B2C shipment ${shipment.awbNumber} delivered to warehouse, auto-forwarded to buyer: ${outgoingResult.awbNumber}`,
+                status: 'forwarded',
+                timestamp: new Date(),
+                metadata: {
+                  incomingAWB: shipment.awbNumber,
+                  outgoingAWB: outgoingResult.awbNumber,
+                  productId: product._id,
+                  shipmentMode: 'B2C'
+                }
               });
               
               // Save order
@@ -377,12 +421,30 @@ async function checkWarehouseShipments() {
               console.log(`   📋 Order updated successfully!`);
               forwardedCount++;
               
-              // Send notification
-              console.log(`   📢 Notification: ${shipment.awbNumber} → ${outgoingResult.awbNumber}`);
+              // Update product shipping status
+              try {
+                const Product = (await import('./models/Product.js')).default;
+                await Product.findByIdAndUpdate(product._id, {
+                  shippingStatus: 'forwarded_from_warehouse',
+                  forwardedAt: new Date(),
+                  warehouseAWB: shipment.awbNumber,
+                  buyerAWB: outgoingResult.awbNumber
+                });
+                console.log(`   ✅ Product shipping status updated`);
+              } catch (productError) {
+                console.log(`   ⚠️  Product update error: ${productError.message}`);
+              }
+              
+              // Send notification (optional)
+              console.log(`   📢 Notification: ${shipment.awbNumber} → ${outgoingResult.awbNumber} (B2C)`);
+              
+            } else {
+              console.log(`   ❌ Failed to create B2C outgoing shipment`);
+              errorCount++;
             }
             
           } catch (shipmentError) {
-            console.error(`   ❌ Error processing AWB ${shipment.awbNumber}:`, shipmentError.message);
+            console.error(`   ❌ Error processing B2C AWB ${shipment.awbNumber}:`, shipmentError.message);
             errorCount++;
           }
         }
@@ -393,57 +455,59 @@ async function checkWarehouseShipments() {
       }
     }
     
-    console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED`);
+    console.log(`\n✅ [B2C WAREHOUSE] AUTO CHECK COMPLETED`);
     console.log(`   📦 Orders processed: ${orders.length}`);
-    console.log(`   🚀 Packages forwarded: ${forwardedCount}`);
+    console.log(`   📬 Incoming shipments delivered: ${deliveredCount}`);
+    console.log(`   🚀 B2C Packages forwarded: ${forwardedCount}`);
     console.log(`   ❌ Errors: ${errorCount}`);
-    console.log(`🕐 [WAREHOUSE] ========== CHECK COMPLETE ==========\n`);
+    console.log(`🕐 [B2C WAREHOUSE] ========== CHECK COMPLETE ==========\n`);
     
   } catch (error) {
-    console.error('❌ [WAREHOUSE] FATAL ERROR:', error);
+    console.error('❌ [B2C WAREHOUSE] FATAL ERROR:', error);
   } finally {
     isCheckingWarehouse = false;
   }
 }
 
-// ✅ SETUP WAREHOUSE AUTO-CHECK INTERVAL
-function setupWarehouseAutoCheck() {
+// ✅ SETUP B2C WAREHOUSE AUTO-CHECK INTERVAL
+function setupB2CWarehouseAutoCheck() {
   // Clear existing interval
   if (warehouseCheckInterval) {
     clearInterval(warehouseCheckInterval);
   }
   
-  const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes for testing, production mein 30 mins rakho
+  const CHECK_INTERVAL = 15 * 60 * 1000; // 15 minutes
   
-  console.log(`🏭 Setting up warehouse auto-check (every ${CHECK_INTERVAL / 60000} minutes)...`);
+  console.log(`🏭 Setting up B2C warehouse auto-check (every ${CHECK_INTERVAL / 60000} minutes)...`);
   
-  // Run check immediately after 10 seconds
+  // Run check immediately after 15 seconds
   setTimeout(() => {
-    console.log('🚀 Running initial warehouse check in 10 seconds...');
+    console.log('🚀 Running initial B2C warehouse check in 15 seconds...');
     setTimeout(() => {
-      checkWarehouseShipments().catch(console.error);
-    }, 10000);
+      checkB2CWarehouseShipments().catch(console.error);
+    }, 15000);
   }, 1000);
   
   // Run check every X minutes
   warehouseCheckInterval = setInterval(() => {
-    checkWarehouseShipments().catch(console.error);
+    checkB2CWarehouseShipments().catch(console.error);
   }, CHECK_INTERVAL);
   
-  console.log(`✅ Warehouse auto-check scheduled every ${CHECK_INTERVAL / 60000} minutes`);
+  console.log(`✅ B2C warehouse auto-check scheduled every ${CHECK_INTERVAL / 60000} minutes`);
 }
 
-// ✅ MANUAL TRIGGER ENDPOINT
-app.post("/api/warehouse/check-now", async (req, res) => {
+// ✅ MANUAL B2C CHECK ENDPOINT
+app.post("/api/warehouse/b2c-check-now", async (req, res) => {
   try {
-    console.log('🚀 Manual warehouse check triggered via API');
+    console.log('🚀 Manual B2C warehouse check triggered via API');
     
-    await checkWarehouseShipments();
+    await checkB2CWarehouseShipments();
     
     res.json({
       success: true,
-      message: 'Warehouse check completed',
+      message: 'B2C warehouse check completed',
       timestamp: new Date().toISOString(),
+      flow: 'B2C Seller → Warehouse → Buyer',
       note: 'Check console logs for details'
     });
   } catch (error) {
@@ -454,83 +518,130 @@ app.post("/api/warehouse/check-now", async (req, res) => {
   }
 });
 
-// ✅ IMMEDIATE TEST ENDPOINT
-app.post("/api/warehouse/test-forward/:awb", async (req, res) => {
+// ✅ MANUAL B2C FORWARD ENDPOINT
+app.post("/api/warehouse/b2c-forward/:awb", async (req, res) => {
   try {
     const { awb } = req.params;
     
-    console.log(`🚀 TEST: Manual forward for AWB ${awb}`);
+    console.log(`🚀 MANUAL B2C FORWARD: Creating B2C shipment for incoming AWB ${awb}`);
     
     const Order = (await import('./models/Order.js')).default;
     const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
     
-    // Find order with this AWB
+    // Find order with this B2C incoming AWB
     const order = await Order.findOne({
       'nimbuspostShipments.awbNumber': awb,
-      'nimbuspostShipments.shipmentType': 'incoming'
+      'nimbuspostShipments.shipmentType': 'seller_to_warehouse',
+      'nimbuspostShipments.shipmentMode': 'B2C'
     })
-    .populate('buyer')
-    .populate('products')
-    .populate('user');
+    .populate('buyer', 'name phone email address')
+    .populate('products', 'productName weight finalPrice images dimensions')
+    .populate('user', 'name phone email');
     
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: `No order found with incoming AWB: ${awb}`
+        message: `No B2C incoming shipment found with AWB: ${awb}`
       });
     }
     
     const shipment = order.nimbuspostShipments.find(s => s.awbNumber === awb);
-    const product = order.products[0];
-    const buyer = order.buyer || order.user;
+    const product = order.products.find(p => 
+      p._id.toString() === shipment.productId?.toString()
+    ) || order.products[0];
     
-    // Create outgoing
-    const outgoingResult = await nimbuspostService.createB2BShipment(
+    const buyer = order.buyer || order.user;
+    const buyerAddress = order.shippingAddress || buyer?.address || {
+      street: 'Address not provided',
+      city: 'City',
+      state: 'State',
+      pincode: '110001'
+    };
+    
+    // Create B2C outgoing shipment
+    const outgoingResult = await nimbuspostService.createWarehouseToBuyerB2C(
       {
-        orderId: `${order._id}-TEST`,
-        totalAmount: order.totalAmount || 0
+        orderId: `JB-OUT-MANUAL-${order._id}-${product._id}`,
+        totalAmount: product.finalPrice || order.totalAmount || 0
       },
       {
-        productName: product?.productName || 'Product',
-        price: product?.finalPrice || 0,
-        weight: 500
+        productName: product.productName || 'Product',
+        price: product.finalPrice || 0,
+        weight: product.weight || 500,
+        dimensions: product.dimensions || { length: 20, breadth: 15, height: 10 },
+        productId: product._id
       },
-      nimbuspostService.WAREHOUSE_DETAILS,
       {
         name: buyer?.name || 'Customer',
         phone: buyer?.phone || '9876543210',
-        address: order.shippingAddress || 'Address not provided'
-      },
-      'warehouse_to_buyer'
+        email: buyer?.email || '',
+        address: buyerAddress,
+        pincode: buyerAddress.pincode || '110001'
+      }
     );
     
     if (outgoingResult.success) {
-      // Update order
+      // Update order with B2C outgoing
       order.nimbuspostShipments.push({
-        productId: product?._id,
+        productId: product._id,
         awbNumber: outgoingResult.awbNumber,
         shipmentId: outgoingResult.shipmentId,
-        shipmentType: 'outgoing',
+        shipmentMode: 'B2C',
+        shipmentType: 'warehouse_to_buyer',
         parentAWB: awb,
         status: 'booked',
         createdAt: new Date(),
-        trackingUrl: outgoingResult.trackingUrl
+        trackingUrl: outgoingResult.trackingUrl,
+        labelUrl: outgoingResult.labelUrl,
+        courierName: outgoingResult.courierName,
+        shipmentDetails: {
+          weight: product.weight || 500,
+          charges: outgoingResult.charges || { freight: 0, total: 0 },
+          estimatedDelivery: outgoingResult.estimatedDelivery
+        },
+        notes: 'Manually created B2C from warehouse',
+        direction: 'outgoing',
+        warehouseDetails: nimbuspostService.getWarehouseInfo()
       });
+      
+      // Update shipping legs
+      const warehouseLeg = order.shippingLegs.find(l => l.leg === 'seller_to_warehouse');
+      if (warehouseLeg) {
+        warehouseLeg.status = 'completed';
+        warehouseLeg.completedAt = new Date();
+        warehouseLeg.notes = `Manually forwarded (B2C: ${outgoingResult.awbNumber})`;
+      }
+      
+      order.shippingLegs.push({
+        leg: 'warehouse_to_buyer',
+        awbNumbers: [outgoingResult.awbNumber],
+        status: 'pending',
+        startedAt: new Date(),
+        courierName: outgoingResult.courierName,
+        notes: 'Manual B2C forwarding',
+        parentAWB: awb
+      });
+      
+      order.status = 'forwarded';
+      order.forwardedAt = new Date();
       
       await order.save();
       
       res.json({
         success: true,
-        message: 'Outgoing shipment created!',
+        message: 'B2C outgoing shipment created successfully!',
+        flow: 'B2C Warehouse → Buyer',
         incomingAWB: awb,
         outgoingAWB: outgoingResult.awbNumber,
         trackingUrl: outgoingResult.trackingUrl,
-        orderId: order._id
+        orderId: order._id,
+        productId: product._id,
+        courier: outgoingResult.courierName
       });
     } else {
       res.status(500).json({
         success: false,
-        message: 'Failed to create outgoing'
+        message: 'Failed to create B2C outgoing shipment'
       });
     }
     
@@ -542,25 +653,28 @@ app.post("/api/warehouse/test-forward/:awb", async (req, res) => {
   }
 });
 
-// ✅ GET WAREHOUSE STATUS
-app.get("/api/warehouse/status", (req, res) => {
+// ✅ GET B2C WAREHOUSE STATUS
+app.get("/api/warehouse/b2c-status", (req, res) => {
   res.json({
     success: true,
     status: {
       autoCheck: true,
-      interval: "5 minutes",
+      interval: "15 minutes",
       isRunning: isCheckingWarehouse,
-      lastCheck: new Date().toISOString()
+      lastCheck: new Date().toISOString(),
+      flowType: 'B2C Warehouse Flow'
     },
-    warehouse: {
-      name: "JustBecho Warehouse",
-      address: "103 Dilpasand grand, Behind Rafael tower, Indore, MP - 452001",
-      contact: "Devansh Kothari - 9301847748"
+    warehouse: nimbuspostService.getWarehouseInfo(),
+    flow: {
+      step1: 'B2C: Seller → Warehouse',
+      step2: 'Auto-check when delivered',
+      step3: 'B2C: Warehouse → Buyer',
+      automation: 'Fully Automated'
     },
     endpoints: {
-      checkNow: "POST /api/warehouse/check-now",
-      testForward: "POST /api/warehouse/test-forward/:awb",
-      dashboard: "GET /api/warehouse/dashboard"
+      checkNow: "POST /api/warehouse/b2c-check-now",
+      manualForward: "POST /api/warehouse/b2c-forward/:awb",
+      dashboard: "GET /api/razorpay/warehouse-dashboard"
     }
   });
 });
@@ -572,10 +686,14 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
     warehouseAutomation: {
       status: "ACTIVE",
+      flow: 'B2C Warehouse Flow',
       method: "setInterval",
-      interval: "5 minutes",
+      interval: "15 minutes",
       isRunning: isCheckingWarehouse,
-      flow: 'seller → warehouse → buyer (AUTO)'
+      legs: [
+        'Leg 1: B2C Seller → Warehouse',
+        'Leg 2: B2C Warehouse → Buyer (Auto)'
+      ]
     }
   });
 });
@@ -583,22 +701,24 @@ app.get("/api/health", (req, res) => {
 // ✅ API Documentation
 app.get("/", (req, res) => {
   res.json({ 
-    message: "🚀 Just Becho API with FULL Warehouse Automation",
+    message: "🚀 Just Becho API with B2C Warehouse Automation",
     timestamp: new Date().toISOString(),
-    version: "4.0.0",
+    version: "5.0.0",
     warehouse: {
       name: "JustBecho Warehouse",
       location: "Indore, Madhya Pradesh",
-      automation: "FULLY AUTOMATED - Seller → Warehouse → Buyer"
+      automation: "B2C WAREHOUSE FLOW - Seller → Warehouse → Buyer (B2C)"
     },
     automation: {
-      check: "Every 5 minutes",
-      trigger: "When incoming marked as 'Delivered'",
-      action: "Auto-create outgoing shipment",
+      check: "Every 15 minutes",
+      trigger: "When B2C incoming marked as 'Delivered'",
+      action: "Auto-create B2C outgoing shipment",
+      shipmentType: "B2C for both legs",
       endpoints: {
-        checkNow: "POST /api/warehouse/check-now",
-        status: "GET /api/warehouse/status",
-        testForward: "POST /api/warehouse/test-forward/:awb"
+        checkNow: "POST /api/warehouse/b2c-check-now",
+        status: "GET /api/warehouse/b2c-status",
+        manualForward: "POST /api/warehouse/b2c-forward/:awb",
+        dashboard: "GET /api/razorpay/warehouse-dashboard"
       }
     }
   });
@@ -630,13 +750,22 @@ process.on('SIGINT', () => {
   
   if (warehouseCheckInterval) {
     clearInterval(warehouseCheckInterval);
-    console.log('✅ Warehouse auto-check stopped');
+    console.log('✅ B2C Warehouse auto-check stopped');
   }
   
   mongoose.connection.close();
   console.log('✅ MongoDB connection closed');
   process.exit(0);
 });
+
+// ✅ IMPORT NIMBUSPOST SERVICE FOR WAREHOUSE INFO
+let nimbuspostService;
+try {
+  // Dynamically import to avoid initialization issues
+  nimbuspostService = (await import('./services/nimbuspostService.js')).default;
+} catch (error) {
+  console.log('⚠️  NimbusPost service not available yet');
+}
 
 // ✅ START SERVER
 const startServer = async () => {
@@ -645,35 +774,43 @@ const startServer = async () => {
     
     const PORT = process.env.PORT || 8000;
     
-    // ✅ START WAREHOUSE AUTOMATION
-    setupWarehouseAutoCheck();
+    // ✅ START B2C WAREHOUSE AUTOMATION
+    setupB2CWarehouseAutoCheck();
     
     app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 4.0.0                  ║
-║             🏭 FULL WAREHOUSE AUTOMATION ENABLED             ║
-║         🔄 SELLER → WAREHOUSE → BUYER (AUTO-FORWARD)         ║
+║                  🚀 JUST BECHO SERVER 5.0.0                  ║
+║            🏭 B2C WAREHOUSE AUTOMATION ENABLED               ║
+║      🔄 B2C: SELLER → WAREHOUSE → BUYER (B2C AUTO-FORWARD)   ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
   ✅ Warehouse Automation: ACTIVE
-  ✅ Auto-check: Every 5 minutes
+  ✅ Shipment Type: B2C for both legs
+  ✅ Auto-check: Every 15 minutes
   ✅ Auto-forward: ENABLED
   ✅ Database: Connected
 
-🏭 WAREHOUSE FLOW (AUTOMATIC):
-  1️⃣ Seller → Warehouse (Incoming) ✅
-  2️⃣ ✅ WHEN DELIVERED → Auto-check triggers
-  3️⃣ Warehouse → Buyer (Outgoing) ✅
-  4️⃣ Buyer receives package ✅
+🏭 B2C WAREHOUSE FLOW (AUTOMATIC):
+  1️⃣ B2C: Seller → Warehouse ✅
+  2️⃣ ✅ WHEN DELIVERED TO WAREHOUSE → Auto-check triggers
+  3️⃣ B2C: Warehouse → Buyer ✅
+  4️⃣ Buyer receives package via B2C ✅
 
-🔧 TEST ENDPOINTS:
-  POST /api/warehouse/check-now       - Force check now
-  POST /api/warehouse/test-forward/AWB - Manual forward
-  GET  /api/warehouse/status          - Check automation status
-  GET  /api/health                    - Health check
+🔧 B2C TEST ENDPOINTS:
+  POST /api/warehouse/b2c-check-now     - Force B2C check now
+  POST /api/warehouse/b2c-forward/:awb   - Manual B2C forward
+  GET  /api/warehouse/b2c-status        - Check B2C automation status
+  GET  /api/razorpay/warehouse-dashboard - Warehouse dashboard
+  GET  /api/health                      - Health check
+
+📦 SHIPMENT DETAILS:
+  📮 Shipment Mode: B2C
+  🔄 Flow: Two-leg B2C via Warehouse
+  ⚡ Automation: Fully Automatic
+  📊 Tracking: Real-time updates
 
 📞 WAREHOUSE CONTACT:
   📍 Address: 103 Dilpasand grand, Behind Rafael tower
@@ -681,9 +818,10 @@ const startServer = async () => {
   📮 Pincode: 452001
   👤 Contact: Devansh Kothari
   📞 Phone: 9301847748
+  📧 Email: warehouse@justbecho.com
 
 ──────────────────────────────────────────────────────────────
-✅ Server is running. Warehouse automation ACTIVE.
+✅ Server is running. B2C Warehouse automation ACTIVE.
 ──────────────────────────────────────────────────────────────
       `);
     });
