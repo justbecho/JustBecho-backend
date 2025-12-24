@@ -1,5 +1,7 @@
+// routes/razorpayOrder.js - FIXED VERSION
 import express from 'express';
 import Razorpay from 'razorpay';
+import mongoose from 'mongoose'; // ✅ Import mongoose here
 import Cart from '../models/Cart.js';
 import Order from '../models/Order.js';
 import authMiddleware from '../middleware/authMiddleware.js';
@@ -54,7 +56,6 @@ router.post('/create-order', authMiddleware, async (req, res) => {
   try {
     console.log('📦 [RAZORPAY] Creating order request received');
     console.log('👤 User ID from auth:', req.user?.userId);
-    console.log('📊 Request body:', req.body);
     
     const { amount, cartId, shippingAddress } = req.body;
     const userId = req.user.userId;
@@ -79,7 +80,6 @@ router.post('/create-order', authMiddleware, async (req, res) => {
     }
 
     console.log('🛒 Cart found:', cart._id);
-    console.log('📊 Cart items:', cart.items?.length || 0);
     console.log('💰 Converting amount:', amount, 'to paise:', Math.round(amount * 100));
 
     // ✅ Create Razorpay order FIRST
@@ -98,57 +98,54 @@ router.post('/create-order', authMiddleware, async (req, res) => {
       console.log('✅ Razorpay order created:', razorpayOrder.id);
     } catch (razorpayError) {
       console.error('❌ Razorpay API error:', razorpayError.message);
-      console.error('Razorpay error details:', razorpayError.error || razorpayError);
-      
       return res.status(500).json({
         success: false,
-        message: 'Payment gateway error: ' + razorpayError.message,
-        debug: process.env.NODE_ENV === 'development' ? razorpayError : undefined
+        message: 'Payment gateway error: ' + razorpayError.message
       });
     }
 
-    // ✅ PREPARE ORDER DATA WITHOUT MIDDLEWARE DEPENDENCIES
+    // ✅ SIMPLE ORDER DATA - NO COMPLEX STRUCTURES
     const orderData = {
       user: userId,
       cart: cartId,
       totalAmount: amount,
       razorpayOrderId: razorpayOrder.id,
-      status: 'pending',
-      shippingAddress: shippingAddress || null,
-      buyer: userId,
-      items: cart.items.map(item => ({
+      status: 'pending'
+    };
+
+    // Add shipping address if provided
+    if (shippingAddress) {
+      orderData.shippingAddress = {
+        name: shippingAddress.name || req.user.name || 'Customer',
+        phone: shippingAddress.phone || req.user.phone || '',
+        email: shippingAddress.email || req.user.email || '',
+        street: shippingAddress.street || '',
+        city: shippingAddress.city || '',
+        state: shippingAddress.state || '',
+        pincode: shippingAddress.pincode || '',
+        country: 'India'
+      };
+    }
+
+    // Add items if cart has items
+    if (cart.items && cart.items.length > 0) {
+      orderData.items = cart.items.map(item => ({
         product: item.product?._id || item.product,
         quantity: item.quantity || 1,
         price: item.price || 0,
         bechoProtect: item.bechoProtect || { selected: false, price: 0 },
         totalPrice: (item.price || 0) * (item.quantity || 1)
-      }))
-    };
+      }));
+    }
 
-    console.log('📦 Creating database order with simplified data');
+    console.log('📦 Creating database order...');
 
-    // ✅ METHOD 1: Direct Order.create() - Most reliable
+    // ✅ METHOD 1: Simple Order.create() with validateBeforeSave: false
     let order;
     try {
       console.log('🔄 Trying Order.create() method...');
       
-      // Create order directly without going through constructor
-      const createdOrders = await Order.create([{
-        user: userId,
-        cart: cartId,
-        totalAmount: amount,
-        razorpayOrderId: razorpayOrder.id,
-        status: 'pending',
-        shippingAddress: shippingAddress || null,
-        buyer: userId,
-        items: cart.items.map(item => ({
-          product: item.product?._id || item.product,
-          quantity: item.quantity || 1,
-          price: item.price || 0,
-          bechoProtect: item.bechoProtect || { selected: false, price: 0 },
-          totalPrice: (item.price || 0) * (item.quantity || 1)
-        }))
-      }], { 
+      const createdOrders = await Order.create([orderData], { 
         validateBeforeSave: false 
       });
       
@@ -158,67 +155,48 @@ router.post('/create-order', authMiddleware, async (req, res) => {
     } catch (createError) {
       console.error('❌ Order.create() failed:', createError.message);
       
-      // ✅ METHOD 2: Insert directly into collection
+      // ✅ METHOD 2: Use new Order() with simple data
       try {
-        console.log('🔄 Trying direct MongoDB insert...');
+        console.log('🔄 Trying new Order() method...');
         
-        const orderDoc = {
-          user: new mongoose.Types.ObjectId(userId),
-          cart: new mongoose.Types.ObjectId(cartId),
+        // Create simpler order to avoid middleware issues
+        const simpleOrder = new Order({
+          user: userId,
+          cart: cartId,
           totalAmount: amount,
           razorpayOrderId: razorpayOrder.id,
           status: 'pending',
           createdAt: new Date(),
           updatedAt: new Date()
-        };
+        });
         
-        if (shippingAddress) {
-          orderDoc.shippingAddress = shippingAddress;
-        }
+        order = await simpleOrder.save({ validateBeforeSave: false });
+        console.log('✅ Minimal order saved:', order._id);
         
-        // Add items if available
-        if (cart.items && cart.items.length > 0) {
-          orderDoc.items = cart.items.map(item => ({
-            product: item.product?._id || item.product,
-            quantity: item.quantity || 1,
-            price: item.price || 0,
-            bechoProtect: item.bechoProtect || { selected: false, price: 0 },
-            totalPrice: (item.price || 0) * (item.quantity || 1)
-          }));
-        }
+      } catch (saveError) {
+        console.error('❌ All order creation methods failed:', saveError.message);
         
-        const result = await Order.collection.insertOne(orderDoc);
-        console.log('✅ Direct insert successful, ID:', result.insertedId);
-        
-        // Get the inserted document
-        order = await Order.findById(result.insertedId);
-        
-      } catch (insertError) {
-        console.error('❌ Direct insert also failed:', insertError.message);
-        
-        // ✅ METHOD 3: Create minimal order
+        // Last resort: Manual insert
         try {
-          console.log('🔄 Creating minimal order...');
+          console.log('🔄 Trying manual insert...');
           
-          const minimalOrder = new Order({
-            user: userId,
-            cart: cartId,
+          const orderDoc = {
+            user: new mongoose.Types.ObjectId(userId),
+            cart: new mongoose.Types.ObjectId(cartId),
             totalAmount: amount,
             razorpayOrderId: razorpayOrder.id,
-            status: 'pending'
-          });
+            status: 'pending',
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
           
-          // Save with bypassing ALL middleware
-          const saved = await minimalOrder.save({ 
-            validateBeforeSave: false 
-          });
+          const result = await Order.collection.insertOne(orderDoc);
+          order = await Order.findById(result.insertedId);
+          console.log('✅ Manual insert successful:', order._id);
           
-          order = saved;
-          console.log('✅ Minimal order saved:', order._id);
-          
-        } catch (minimalError) {
-          console.error('❌ All order creation methods failed:', minimalError.message);
-          throw new Error(`Order creation failed: ${minimalError.message}`);
+        } catch (manualError) {
+          console.error('❌ Manual insert also failed:', manualError.message);
+          throw new Error(`Order creation failed: ${manualError.message}`);
         }
       }
     }
@@ -238,7 +216,7 @@ router.post('/create-order', authMiddleware, async (req, res) => {
       },
       orderInfo: {
         totalAmount: amount,
-        items: order.items?.length || cart.items?.length || 0,
+        itemsCount: cart.items?.length || 0,
         razorpayOrderId: razorpayOrder.id,
         orderStatus: order.status
       },
@@ -251,31 +229,24 @@ router.post('/create-order', authMiddleware, async (req, res) => {
 
   } catch (error) {
     console.error('❌ [RAZORPAY] Order creation error:', error.message);
-    console.error('Error stack:', error.stack);
     
-    // Detailed error response
     res.status(500).json({
       success: false,
       message: 'Failed to create order: ' + error.message,
       errorType: error.name,
       troubleshooting: [
-        'Check Order model for middleware issues',
+        'Check if cart exists',
         'Verify database connection',
-        'Ensure cart exists and has items',
-        'Check if Razorpay keys are valid'
-      ],
-      debug: process.env.NODE_ENV === 'development' ? {
-        message: error.message,
-        stack: error.stack
-      } : undefined
+        'Check Razorpay API keys'
+      ]
     });
   }
 });
 
-// ✅ CREATE ORDER WITHOUT MIDDLEWARE (Alternative route)
+// ✅ SIMPLE CREATE ORDER (Alternative)
 router.post('/create-order-simple', authMiddleware, async (req, res) => {
   try {
-    const { amount, cartId, shippingAddress } = req.body;
+    const { amount, cartId } = req.body;
     const userId = req.user.userId;
     
     if (!amount || amount < 1) {
@@ -295,24 +266,16 @@ router.post('/create-order-simple', authMiddleware, async (req, res) => {
     
     const razorpayOrder = await razorpay.orders.create(razorpayOrderData);
     
-    // Create order with simplest possible data
-    const orderDoc = {
+    // Create simplest possible order
+    const order = new Order({
       user: userId,
       cart: cartId,
       totalAmount: amount,
       razorpayOrderId: razorpayOrder.id,
-      status: 'pending',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+      status: 'pending'
+    });
     
-    if (shippingAddress) {
-      orderDoc.shippingAddress = shippingAddress;
-    }
-    
-    // Insert directly
-    const result = await Order.collection.insertOne(orderDoc);
-    const order = await Order.findById(result.insertedId);
+    await order.save({ validateBeforeSave: false });
     
     res.json({
       success: true,
@@ -329,7 +292,7 @@ router.post('/create-order-simple', authMiddleware, async (req, res) => {
     console.error('Simple order creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Order creation failed: ' + error.message
+      message: error.message
     });
   }
 });
@@ -337,12 +300,12 @@ router.post('/create-order-simple', authMiddleware, async (req, res) => {
 // ✅ CREATE TEST ORDER (No auth required for testing)
 router.post('/test-create-order', async (req, res) => {
   try {
-    const { amount = 100, email = 'test@example.com' } = req.body;
+    const { amount = 100 } = req.body;
     
     console.log('🧪 Creating test Razorpay order...');
     
     const razorpayOrderData = {
-      amount: Math.round(amount * 100), // Rupees to paise
+      amount: Math.round(amount * 100),
       currency: 'INR',
       receipt: `test_${Date.now()}`,
       payment_capture: 1
@@ -369,31 +332,24 @@ router.post('/test-create-order', async (req, res) => {
     res.json({
       success: true,
       message: 'Test order created',
-      order: razorpayOrder,
-      testInfo: {
-        amountInRupees: amount,
-        amountInPaise: razorpayOrder.amount,
-        email: email,
-        timestamp: new Date().toISOString()
-      }
+      order: razorpayOrder
     });
     
   } catch (error) {
     console.error('Test order creation error:', error);
     res.status(500).json({
       success: false,
-      message: 'Test failed: ' + error.message
+      message: error.message
     });
   }
 });
 
-// ✅ GET ORDER STATUS (For debugging)
+// ✅ GET ORDER STATUS
 router.get('/order-status/:orderId', authMiddleware, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
       .populate('user', 'name email')
-      .populate('cart', 'items subtotal')
-      .lean();
+      .populate('cart', 'items subtotal');
     
     if (!order) {
       return res.status(404).json({
@@ -410,8 +366,7 @@ router.get('/order-status/:orderId', authMiddleware, async (req, res) => {
         totalAmount: order.totalAmount,
         razorpayOrderId: order.razorpayOrderId,
         status: order.status,
-        createdAt: order.createdAt,
-        itemsCount: order.items?.length || 0
+        createdAt: order.createdAt
       }
     });
   } catch (error) {
@@ -428,8 +383,7 @@ router.get('/my-orders', authMiddleware, async (req, res) => {
     const userId = req.user.userId;
     
     const orders = await Order.find({ user: userId })
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
     
     res.json({
       success: true,
@@ -438,8 +392,7 @@ router.get('/my-orders', authMiddleware, async (req, res) => {
         totalAmount: order.totalAmount,
         status: order.status,
         razorpayOrderId: order.razorpayOrderId,
-        createdAt: order.createdAt,
-        itemsCount: order.items?.length || 0
+        createdAt: order.createdAt
       })),
       count: orders.length
     });
@@ -464,8 +417,7 @@ router.get('/config-check', (req, res) => {
       keySecretExists: !!keySecret,
       keyIdPreview: keyId ? keyId.substring(0, 10) + '...' : 'Not set',
       environment: process.env.NODE_ENV || 'development'
-    },
-    serverTime: new Date().toISOString()
+    }
   });
 });
 
