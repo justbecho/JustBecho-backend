@@ -8,7 +8,7 @@ class NimbusPostService {
     this.credentials = NIMBUSPOST_CONFIG.credentials;
     this.apiKey = NIMBUSPOST_CONFIG.apiKey;
     this.WAREHOUSE_DETAILS = NIMBUSPOST_CONFIG.warehouse;
-    this.defaultCourier = NIMBUSPOST_CONFIG.defaultCourier;
+    this.defaultCourier = 14; // ✅ FIXED: Integer courier ID for Delhivery
     this.b2cSettings = NIMBUSPOST_CONFIG.b2cSettings;
     this.authToken = null;
     this.tokenExpiry = null;
@@ -123,7 +123,14 @@ class NimbusPostService {
   // ✅ 2. SHIPMENT CREATION METHODS
   // ==============================================
   
-  // ✅ CREATE B2C SHIPMENT (MAIN METHOD)
+  // ✅ GENERATE SHORT ORDER NUMBER (MAX 20 CHARS)
+  generateShortOrderNumber(type = 'IN') {
+    const timestamp = Date.now().toString().slice(-8); // Last 8 digits
+    const random = Math.random().toString(36).substr(2, 4).toUpperCase();
+    return `JB${type}${timestamp}${random}`; // Format: JBIN12345678ABCD
+  }
+  
+  // ✅ CREATE B2C SHIPMENT (MAIN METHOD) - FIXED
   async createB2CShipment(shipmentData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating shipment:', shipmentData.order_number);
@@ -132,6 +139,7 @@ class NimbusPostService {
       
       console.log('📤 [NIMBUSPOST] Sending to API...');
       console.log('🔐 Auth Method:', headers['api-key'] ? 'API Key' : 'Bearer Token');
+      console.log('📦 Shipment Data:', JSON.stringify(shipmentData, null, 2));
       
       const response = await axios.post(
         `${this.baseURL}${NIMBUSPOST_ENDPOINTS.createShipment}`,
@@ -168,6 +176,7 @@ class NimbusPostService {
         };
       } else {
         console.error('❌ [NIMBUSPOST] Shipment failed:', response.data.message);
+        console.error('❌ Response data:', response.data);
         
         // If it's auth error, try with fresh login
         if (response.data.message?.includes('Token') || response.data.message?.includes('auth')) {
@@ -212,7 +221,8 @@ class NimbusPostService {
       console.error('❌ [NIMBUSPOST] Create Shipment Error:', {
         message: error.message,
         status: error.response?.status,
-        data: error.response?.data
+        data: error.response?.data,
+        config: error.config?.data ? JSON.parse(error.config.data) : 'No config data'
       });
       
       // Fallback to mock
@@ -221,66 +231,71 @@ class NimbusPostService {
     }
   }
   
-  // ✅ CREATE SELLER → WAREHOUSE B2C SHIPMENT
+  // ✅ CREATE SELLER → WAREHOUSE B2C SHIPMENT - FIXED
   async createSellerToWarehouseB2C(orderData, productData, sellerData) {
     try {
       console.log('🏭 [NIMBUSPOST] Creating Seller → Warehouse B2C shipment');
       
-      const orderNumber = `JB-IN-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      // ✅ FIXED: Short order number
+      const orderNumber = this.generateShortOrderNumber('IN');
+      
+      // ✅ FIXED: Parse seller address
+      let sellerAddress = sellerData.address || {};
+      if (typeof sellerAddress === 'string') {
+        sellerAddress = {
+          street: sellerAddress,
+          city: 'Mumbai',
+          state: 'Maharashtra',
+          pincode: '400001'
+        };
+      }
       
       const shipmentData = {
+        // ✅ FIXED: Short order number
         order_number: orderNumber,
-        payment_type: this.b2cSettings.payment_type,
+        payment_type: 'Prepaid', // ✅ FIXED: Simple string
         order_amount: productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: NIMBUSPOST_CONFIG.autoPickup,
+        request_auto_pickup: true,
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
         
-        // PICKUP: Seller
+        // ✅ FIXED: Simplified pickup (Seller)
         pickup: {
-          warehouse_name: sellerData.company || 'Seller',
           name: sellerData.name || 'Seller',
-          address: sellerData.address?.street || sellerData.address || 'Seller Address',
-          address_2: sellerData.address?.landmark || '',
-          city: sellerData.address?.city || sellerData.city || 'Mumbai',
-          state: sellerData.address?.state || sellerData.state || 'Maharashtra',
-          pincode: sellerData.address?.pincode || sellerData.pincode || '400001',
           phone: sellerData.phone || '9876543210',
-          latitude: sellerData.latitude || '19.0760',
-          longitude: sellerData.longitude || '72.8777'
+          address: sellerAddress.street || 'Seller Address',
+          city: sellerAddress.city || 'Mumbai',
+          state: sellerAddress.state || 'Maharashtra',
+          pincode: sellerAddress.pincode || '400001'
         },
         
-        // CONSIGNEE: Warehouse
+        // ✅ FIXED: Simplified consignee (Warehouse)
         consignee: {
           name: this.WAREHOUSE_DETAILS.name,
-          company_name: this.WAREHOUSE_DETAILS.company,
+          phone: this.WAREHOUSE_DETAILS.phone,
           address: this.WAREHOUSE_DETAILS.address,
-          address_2: '',
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
-          pincode: this.WAREHOUSE_DETAILS.pincode,
-          phone: this.WAREHOUSE_DETAILS.phone,
-          latitude: this.WAREHOUSE_DETAILS.latitude,
-          longitude: this.WAREHOUSE_DETAILS.longitude
+          pincode: this.WAREHOUSE_DETAILS.pincode
         },
         
-        // Order items
+        // ✅ FIXED: Simple order items
         order_items: [{
-          name: `${productData.productName || 'Product'} (To Warehouse)`,
+          name: productData.productName || 'Product',
           qty: productData.quantity || 1,
-          price: productData.price || 100,
-          sku: `SKU-IN-${productData.productId || Date.now()}`
+          price: productData.price || 100
         }],
         
-        // Courier
-        courier_id: this.defaultCourier,
-        is_insurance: this.b2cSettings.is_insurance,
-        tags: 'justbecho,warehouse,incoming'
+        // ✅ FIXED: Courier ID as integer
+        courier_id: this.defaultCourier, // Must be integer (14 for Delhivery)
+        
+        // ✅ FIXED: Simple insurance flag
+        is_insurance: false
       };
       
       const result = await this.createB2CShipment(shipmentData);
@@ -299,66 +314,71 @@ class NimbusPostService {
     }
   }
   
-  // ✅ CREATE WAREHOUSE → BUYER B2C SHIPMENT
+  // ✅ CREATE WAREHOUSE → BUYER B2C SHIPMENT - FIXED
   async createWarehouseToBuyerB2C(orderData, productData, buyerData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating Warehouse → Buyer B2C shipment');
       
-      const orderNumber = `JB-OUT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      // ✅ FIXED: Short order number
+      const orderNumber = this.generateShortOrderNumber('OUT');
+      
+      // ✅ FIXED: Parse buyer address
+      let buyerAddress = buyerData.address || {};
+      if (typeof buyerAddress === 'string') {
+        buyerAddress = {
+          street: buyerAddress,
+          city: 'Delhi',
+          state: 'Delhi',
+          pincode: '110001'
+        };
+      }
       
       const shipmentData = {
+        // ✅ FIXED: Short order number
         order_number: orderNumber,
-        payment_type: this.b2cSettings.payment_type,
+        payment_type: 'Prepaid', // ✅ FIXED: Simple string
         order_amount: productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: NIMBUSPOST_CONFIG.autoPickup,
+        request_auto_pickup: true,
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
         
-        // PICKUP: Warehouse
+        // ✅ FIXED: Simplified pickup (Warehouse)
         pickup: {
-          warehouse_name: this.WAREHOUSE_DETAILS.company,
           name: this.WAREHOUSE_DETAILS.name,
+          phone: this.WAREHOUSE_DETAILS.phone,
           address: this.WAREHOUSE_DETAILS.address,
-          address_2: '',
           city: this.WAREHOUSE_DETAILS.city,
           state: this.WAREHOUSE_DETAILS.state,
-          pincode: this.WAREHOUSE_DETAILS.pincode,
-          phone: this.WAREHOUSE_DETAILS.phone,
-          latitude: this.WAREHOUSE_DETAILS.latitude,
-          longitude: this.WAREHOUSE_DETAILS.longitude
+          pincode: this.WAREHOUSE_DETAILS.pincode
         },
         
-        // CONSIGNEE: Buyer
+        // ✅ FIXED: Simplified consignee (Buyer)
         consignee: {
           name: buyerData.name || 'Customer',
-          company_name: buyerData.company || '',
-          address: buyerData.address?.street || buyerData.address || 'Customer Address',
-          address_2: buyerData.address?.landmark || '',
-          city: buyerData.address?.city || buyerData.city || 'Delhi',
-          state: buyerData.address?.state || buyerData.state || 'Delhi',
-          pincode: buyerData.address?.pincode || buyerData.pincode || '110001',
           phone: buyerData.phone || '9876543210',
-          latitude: buyerData.latitude || '28.7041',
-          longitude: buyerData.longitude || '77.1025'
+          address: buyerAddress.street || 'Customer Address',
+          city: buyerAddress.city || 'Delhi',
+          state: buyerAddress.state || 'Delhi',
+          pincode: buyerAddress.pincode || '110001'
         },
         
-        // Order items
+        // ✅ FIXED: Simple order items
         order_items: [{
           name: productData.productName || 'Product',
           qty: productData.quantity || 1,
-          price: productData.price || 100,
-          sku: `SKU-OUT-${productData.productId || Date.now()}`
+          price: productData.price || 100
         }],
         
-        // Courier
-        courier_id: this.defaultCourier,
-        is_insurance: this.b2cSettings.is_insurance,
-        tags: 'justbecho,customer,outgoing'
+        // ✅ FIXED: Courier ID as integer
+        courier_id: this.defaultCourier, // Must be integer (14 for Delhivery)
+        
+        // ✅ FIXED: Simple insurance flag
+        is_insurance: false
       };
       
       const result = await this.createB2CShipment(shipmentData);
@@ -437,8 +457,8 @@ class NimbusPostService {
     }
   }
   
-  // ✅ GET COURIER LIST
-  async getCourierList(pincode) {
+  // ✅ GET COURIER LIST - FIXED
+  async getCourierList(pincode = '452001') {
     try {
       const headers = await this.getAuthHeaders();
       
@@ -448,6 +468,22 @@ class NimbusPostService {
           headers: headers
         }
       );
+      
+      console.log('📋 Available couriers for pincode:', pincode);
+      if (response.data.data && Array.isArray(response.data.data)) {
+        response.data.data.forEach(courier => {
+          console.log(`  ${courier.courier_name} - ID: ${courier.courier_id}`);
+        });
+        
+        // Find Delhivery
+        const delhivery = response.data.data.find(c => 
+          c.courier_name.toLowerCase().includes('delhivery')
+        );
+        if (delhivery) {
+          console.log(`✅ Found Delhivery: ID = ${delhivery.courier_id}`);
+          this.defaultCourier = delhivery.courier_id;
+        }
+      }
       
       return response.data;
     } catch (error) {
@@ -485,21 +521,17 @@ class NimbusPostService {
       };
       console.log('✅ API Key:', apiKeyStatus);
       
-      // Test 3: Simple endpoint
+      // Test 3: Get courier list to find correct courier ID
       console.log('\n🌐 Test 3: Testing /couriers endpoint...');
       let endpointResult = { success: false };
       try {
-        const headers = await this.getAuthHeaders();
-        const testResponse = await axios.get(
-          `${this.baseURL}/couriers`,
-          { headers, timeout: 5000 }
-        );
+        const courierResult = await this.getCourierList('452001');
         endpointResult = {
-          success: testResponse.status === 200,
-          status: testResponse.status,
-          hasData: !!testResponse.data
+          success: !!courierResult.data,
+          courierCount: courierResult.data?.length || 0,
+          defaultCourierId: this.defaultCourier
         };
-        console.log('✅ Endpoint:', endpointResult);
+        console.log('✅ Couriers:', endpointResult);
       } catch (endpointError) {
         endpointResult = {
           success: false,
@@ -525,13 +557,10 @@ class NimbusPostService {
           email: this.credentials.email,
           apiKey: this.apiKey ? '***' + this.apiKey.slice(-6) : 'Not set'
         },
-        recommendations: overallSuccess ? 
-          ['Ready for shipments'] : 
-          [
-            'Check email/password',
-            'Verify API key format',
-            'Contact NimbusPost support'
-          ]
+        courierInfo: {
+          defaultCourierId: this.defaultCourier,
+          note: 'Ensure courier_id is integer (14 for Delhivery)'
+        }
       };
       
     } catch (error) {
@@ -682,6 +711,7 @@ class NimbusPostService {
       hasToken: !!this.authToken,
       tokenExpiry: this.tokenExpiry,
       hasApiKey: !!this.apiKey,
+      defaultCourier: this.defaultCourier,
       warehouse: this.WAREHOUSE_DETAILS
     };
   }
