@@ -1,9 +1,9 @@
 // config/nimbuspostConfig.js - UPDATED
 export const NIMBUSPOST_CONFIG = {
-  // ✅ YOUR NEW CORRECT CREDENTIALS
+  // ✅ YOUR CORRECT CREDENTIALS
   credentials: {
-    email: 'justbecho+2995@gmail.com',  // UPDATED
-    password: 'FgVWcfQSnt'               // UPDATED
+    email: 'justbecho+2995@gmail.com',
+    password: 'FgVWcfQSnt'
   },
   apiKey: 'ccbd48931ea40e234e8b00142ba1d8b60a2e71ae242245',
   
