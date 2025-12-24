@@ -101,7 +101,7 @@ class NimbusPostService {
   }
   
   // ==============================================
-  // ✅ 2. SHIPMENT CREATION METHODS
+  // ✅ 2. SHIPMENT CREATION METHODS - FIXED PAYMENT_TYPE
   // ==============================================
   
   generateShortOrderNumber(type = 'IN') {
@@ -110,16 +110,16 @@ class NimbusPostService {
     return `JB${type}${timestamp}${random}`;
   }
   
-  // ✅ MAIN SHIPMENT CREATION METHOD - FIXED FORMAT
+  // ✅ MAIN SHIPMENT CREATION METHOD - FIXED PAYMENT_TYPE
   async createB2CShipment(shipmentData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating shipment:', shipmentData.order_number);
       
-      // ✅ CRITICAL: Fix data format before sending
+      // ✅ CRITICAL FIX: Convert payment_type to lowercase
       const fixedShipmentData = {
         ...shipmentData,
-        // Ensure correct format
-        payment_type: shipmentData.payment_type || 'PREPAID',
+        // ✅ FIXED: payment_type must be lowercase
+        payment_type: (shipmentData.payment_type || 'prepaid').toLowerCase(),
         request_auto_pickup: shipmentData.request_auto_pickup || 'yes',
         support_email: shipmentData.support_email || 'justbecho@gmail.com',
         support_phone: shipmentData.support_phone || '7000739393',
@@ -194,7 +194,7 @@ class NimbusPostService {
     }
   }
   
-  // ✅ SELLER → WAREHOUSE B2C - COMPLETE FIXED
+  // ✅ SELLER → WAREHOUSE B2C - FIXED PAYMENT_TYPE
   async createSellerToWarehouseB2C(orderData, productData, sellerData) {
     try {
       console.log('🏭 [NIMBUSPOST] Creating Seller → Warehouse B2C shipment');
@@ -213,15 +213,15 @@ class NimbusPostService {
       }
       
       const shipmentData = {
-        // ✅ FIXED: Correct field names and formats
+        // ✅ FIXED: payment_type in lowercase
         order_number: orderNumber,
-        payment_type: 'PREPAID', // ✅ MUST BE UPPERCASE
+        payment_type: 'prepaid', // ✅ FIXED: MUST BE LOWERCASE
         order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: 'yes', // ✅ MUST BE STRING 'yes' or 'no'
+        request_auto_pickup: 'yes',
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
@@ -233,7 +233,7 @@ class NimbusPostService {
         
         // ✅ FIXED: Pickup with warehouse_name
         pickup: {
-          warehouse_name: sellerData.company || 'JustBecho Seller', // ✅ REQUIRED FIELD
+          warehouse_name: sellerData.company || 'JustBecho Seller',
           name: sellerData.name || 'Seller',
           phone: sellerData.phone || '9876543210',
           address: sellerAddress.street || sellerAddress.address || 'Seller Address',
@@ -280,7 +280,7 @@ class NimbusPostService {
     }
   }
   
-  // ✅ WAREHOUSE → BUYER B2C - COMPLETE FIXED
+  // ✅ WAREHOUSE → BUYER B2C - FIXED PAYMENT_TYPE
   async createWarehouseToBuyerB2C(orderData, productData, buyerData) {
     try {
       console.log('🚚 [NIMBUSPOST] Creating Warehouse → Buyer B2C shipment');
@@ -299,15 +299,15 @@ class NimbusPostService {
       }
       
       const shipmentData = {
-        // ✅ FIXED: Correct field names and formats
+        // ✅ FIXED: payment_type in lowercase
         order_number: orderNumber,
-        payment_type: 'PREPAID', // ✅ MUST BE UPPERCASE
+        payment_type: 'prepaid', // ✅ FIXED: MUST BE LOWERCASE
         order_amount: orderData.totalAmount || productData.price || 100,
         package_weight: productData.weight || 500,
         package_length: productData.dimensions?.length || 20,
         package_breadth: productData.dimensions?.breadth || 15,
         package_height: productData.dimensions?.height || 10,
-        request_auto_pickup: 'yes', // ✅ MUST BE STRING 'yes' or 'no'
+        request_auto_pickup: 'yes',
         shipping_charges: 0,
         discount: 0,
         cod_charges: 0,
@@ -319,7 +319,7 @@ class NimbusPostService {
         
         // ✅ FIXED: Pickup with warehouse_name
         pickup: {
-          warehouse_name: this.WAREHOUSE_DETAILS.company, // ✅ REQUIRED FIELD
+          warehouse_name: this.WAREHOUSE_DETAILS.company,
           name: this.WAREHOUSE_DETAILS.name,
           phone: this.WAREHOUSE_DETAILS.phone,
           address: this.WAREHOUSE_DETAILS.address,

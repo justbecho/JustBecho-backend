@@ -1,4 +1,4 @@
-// config/nimbuspostConfig.js - COMPLETE FIXED VERSION
+// config/nimbuspostConfig.js - UPDATED VERSION
 const NIMBUSPOST_CONFIG = {
   baseURL: 'https://api.nimbuspost.com/v1',
   
@@ -11,22 +11,22 @@ const NIMBUSPOST_CONFIG = {
   
   warehouse: {
     name: 'Devansh Kothari',
-    company: 'JustBecho Warehouse', // ✅ REQUIRED: For warehouse_name field
+    company: 'JustBecho Warehouse',
     address: '103 Dilpasand grand, Behind Rafael tower',
     city: 'Indore',
     state: 'Madhya Pradesh',
     pincode: '452001',
-    phone: '7000739393', // ✅ Your verified OTP number
+    phone: '7000739393',
     latitude: '22.7196',
     longitude: '75.8577'
   },
   
   defaultCourier: 14, // Delhivery courier ID
   
-  autoPickup: 'yes', // ✅ FIXED: Must be string 'yes' or 'no'
+  autoPickup: 'yes',
   
   b2cSettings: {
-    payment_type: 'PREPAID', // ✅ FIXED: Must be uppercase
+    payment_type: 'prepaid', // ✅ CHANGED FROM 'PREPAID' TO 'prepaid'
     is_insurance: false
   }
 };
