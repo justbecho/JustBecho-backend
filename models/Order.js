@@ -1,4 +1,4 @@
-// models/Order.js - COMPLETE WITH B2C SUPPORT
+// models/Order.js - FIXED MIDDLEWARE
 import mongoose from 'mongoose';
 
 const orderSchema = new mongoose.Schema({
@@ -417,27 +417,38 @@ orderSchema.virtual('trackingUrl').get(function() {
   return awb ? `https://track.nimbuspost.com/track/${awb}` : null;
 });
 
-// ✅ PRE-SAVE HOOK FOR TIMELINE
+// ✅ FIXED PRE-SAVE HOOK - NO MIDDLEWARE ISSUES
 orderSchema.pre('save', function(next) {
-  // Add to timeline if status changed
-  if (this.isModified('status')) {
-    if (!this.timeline) {
-      this.timeline = [];
+  try {
+    // Add to timeline if status changed
+    if (this.isModified('status')) {
+      if (!this.timeline) {
+        this.timeline = [];
+      }
+      
+      this.timeline.push({
+        event: 'status_change',
+        description: `Order status changed to ${this.status}`,
+        status: this.status,
+        timestamp: new Date(),
+        metadata: {
+          previousStatus: this._originalStatus || 'unknown'
+        }
+      });
+      
+      this._originalStatus = this.status;
     }
     
-    this.timeline.push({
-      event: 'status_change',
-      description: `Order status changed to ${this.status}`,
-      status: this.status,
-      metadata: {
-        previousStatus: this._originalStatus || 'unknown'
-      }
-    });
-    
-    this._originalStatus = this.status;
+    // ✅ FIXED: Always call next() safely
+    if (typeof next === 'function') {
+      next();
+    }
+  } catch (error) {
+    console.error('❌ Order pre-save error:', error);
+    if (typeof next === 'function') {
+      next(error);
+    }
   }
-  
-  next();
 });
 
 // ✅ STATIC METHOD TO FIND BY AWB
@@ -476,6 +487,7 @@ orderSchema.methods.addShipment = function(shipmentData) {
     event: 'shipment_created',
     description: `Shipment created with AWB: ${shipmentData.awbNumber}`,
     status: shipmentData.status,
+    timestamp: new Date(),
     metadata: {
       awbNumber: shipmentData.awbNumber,
       courier: shipmentData.courierName
