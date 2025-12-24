@@ -1,15 +1,14 @@
-// config/nimbuspostConfig.js - UPDATED FOR NEW API
+// config/nimbuspostConfig.js - UPDATED
 export const NIMBUSPOST_CONFIG = {
-  // ✅ Login credentials from your account
+  // ✅ YOUR NEW CORRECT CREDENTIALS
   credentials: {
-    email: 'justbecho+2985@gmail.com',
-    password: 'vRcYE3eZPj'
+    email: 'justbecho+2995@gmail.com',  // UPDATED
+    password: 'FgVWcfQSnt'               // UPDATED
   },
+  apiKey: 'ccbd48931ea40e234e8b00142ba1d8b60a2e71ae242245',
   
-  // ✅ API Endpoints
   baseURL: 'https://api.nimbuspost.com/v1',
   
-  // ✅ WAREHOUSE DETAILS
   warehouse: {
     name: 'Devansh Kothari',
     company: 'JustBecho Warehouse',
@@ -19,15 +18,13 @@ export const NIMBUSPOST_CONFIG = {
     city: 'Indore',
     state: 'Madhya Pradesh',
     pincode: '452001',
-    latitude: '22.7196', // Indore coordinates
+    latitude: '22.7196',
     longitude: '75.8577'
   },
   
-  // ✅ DEFAULT SETTINGS
-  defaultCourier: 'autoship', // Let NimbusPost choose best courier
+  defaultCourier: 'autoship',
   autoPickup: 'yes',
   
-  // ✅ B2C SETTINGS
   b2cSettings: {
     payment_type: 'prepaid',
     service_type: 'surface',
@@ -37,7 +34,7 @@ export const NIMBUSPOST_CONFIG = {
 
 export const NIMBUSPOST_ENDPOINTS = {
   login: '/users/login',
-  createShipment: '/shipments/hyperlocal', // Using hyperlocal endpoint
+  createShipment: '/shipments/hyperlocal',
   trackShipment: '/shipments/track/bulk',
   cancelShipment: '/shipments/cancel',
   manifest: '/shipments/manifest',
