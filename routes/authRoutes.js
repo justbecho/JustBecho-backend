@@ -247,7 +247,7 @@ router.get("/google", (req, res) => {
   res.redirect(googleAuthUrl);
 });
 
-// ✅ GOOGLE OAUTH CALLBACK - UPDATED WITH isNewUser FLAG
+// ✅ GOOGLE OAUTH CALLBACK - FIXED VERSION (NO /login REDIRECTS)
 router.get("/google/callback", async (req, res) => {
   try {
     console.log('🔄 ===== GOOGLE CALLBACK STARTED =====');
@@ -255,19 +255,22 @@ router.get("/google/callback", async (req, res) => {
     
     const { code, error, error_description, state } = req.query;
     
+    // ✅ FIXED: Handle errors by redirecting to homepage with error parameter
     if (error) {
       console.error('❌ Google OAuth error:', error);
       console.error('Error description:', error_description);
       
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
-      return res.redirect(`${frontendUrl}/login?error=google_${error}`);
+      // ✅ FIXED: Redirect to homepage, NOT /login
+      return res.redirect(`${frontendUrl}/?auth_error=google_${error}`);
     }
     
     if (!code) {
       console.error('❌ No authorization code received');
       
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
-      return res.redirect(`${frontendUrl}/login?error=no_auth_code`);
+      // ✅ FIXED: Redirect to homepage, NOT /login
+      return res.redirect(`${frontendUrl}/?auth_error=no_auth_code`);
     }
     
     console.log('✅ Authorization code received');
@@ -278,7 +281,8 @@ router.get("/google/callback", async (req, res) => {
       console.error('❌ GOOGLE_CLIENT_SECRET not found');
       
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
-      return res.redirect(`${frontendUrl}/login?error=missing_config`);
+      // ✅ FIXED: Redirect to homepage, NOT /login
+      return res.redirect(`${frontendUrl}/?auth_error=missing_config`);
     }
     
     // ✅ Determine frontend URL from state
@@ -308,7 +312,9 @@ router.get("/google/callback", async (req, res) => {
     
     if (tokenData.error) {
       console.error('❌ Token exchange failed:', tokenData.error);
-      return res.redirect(`${frontendUrl}/login?error=token_exchange`);
+      console.error('Token error details:', tokenData.error_description);
+      // ✅ FIXED: Redirect to homepage, NOT /login
+      return res.redirect(`${frontendUrl}/?auth_error=token_exchange`);
     }
     
     const { access_token } = tokenData;
@@ -340,7 +346,8 @@ router.get("/google/callback", async (req, res) => {
         name: userInfo.name || userInfo.email.split('@')[0],
         googleId: userInfo.sub,
         profileCompleted: false,
-        role: 'user'
+        role: 'user',
+        isNewUser: true
       });
       await user.save();
       isNewUser = true;
@@ -354,14 +361,14 @@ router.get("/google/callback", async (req, res) => {
       console.log('✅ Existing user found');
     }
     
-    // ✅ Generate JWT token with isNewUser flag
+    // ✅ Generate JWT token
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      isNewUser: isNewUser, // ✅ CRITICAL: Add this flag
       name: user.name,
       role: user.role,
-      profileCompleted: user.profileCompleted
+      profileCompleted: user.profileCompleted,
+      isNewUser: isNewUser
     };
     
     const jwtToken = jwt.sign(
@@ -377,31 +384,25 @@ router.get("/google/callback", async (req, res) => {
       role: user.role
     });
     
-    // ✅ CRITICAL: Different redirect logic based on user status
+    // ✅ FIXED: Different redirect logic
     let redirectUrl = `${frontendUrl}`;
     
-    if (isNewUser) {
-      // New Google user - go to homepage (role selection will be triggered)
-      redirectUrl = `${frontendUrl}?token=${jwtToken}&newUser=true&source=google`;
-      console.log('👶 New Google user, will show role selection');
-    } else {
-      // Existing user - check profile completion
-      if (!user.profileCompleted) {
-        redirectUrl = `${frontendUrl}/complete-profile?token=${jwtToken}&source=google`;
-        console.log('🔄 Existing user, profile not completed');
-      } else {
-        redirectUrl = `${frontendUrl}/dashboard?token=${jwtToken}&source=google`;
-        console.log('🚀 Existing user with completed profile, redirecting to dashboard');
-      }
-    }
+    // Add token to URL
+    redirectUrl += `?token=${jwtToken}&source=google`;
     
-    // Add user info to URL
+    // Add user info
     if (user.name) {
       redirectUrl += `&name=${encodeURIComponent(user.name)}`;
     }
     if (user.email) {
       redirectUrl += `&email=${encodeURIComponent(user.email)}`;
     }
+    
+    // Add isNewUser flag
+    redirectUrl += `&isNewUser=${isNewUser}`;
+    
+    // Add profileCompleted flag
+    redirectUrl += `&profileCompleted=${user.profileCompleted}`;
     
     console.log('Final redirect URL:', redirectUrl);
     console.log('===== GOOGLE CALLBACK COMPLETED =====\n');
@@ -413,7 +414,8 @@ router.get("/google/callback", async (req, res) => {
     console.error('Error stack:', error.stack);
     
     const frontendUrl = PRODUCTION_CONFIG.frontendUrl;
-    res.redirect(`${frontendUrl}/login?error=auth_failed`);
+    // ✅ FIXED: Redirect to homepage, NOT /login
+    res.redirect(`${frontendUrl}/?auth_error=auth_failed`);
   }
 });
 
