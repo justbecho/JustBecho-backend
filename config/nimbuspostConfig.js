@@ -10,7 +10,7 @@ const NIMBUSPOST_CONFIG = {
   apiKey: process.env.NIMBUSPOST_API_KEY || 'ccbd48931ea40e234e8b00142ba1d8b60a2e71ae242245',
   
   warehouse: {
-    name: 'Devansh Kothari',
+    name: 'Just Becho',
     company: 'JustBecho Warehouse',
     address: '103 Dilpasand grand, Behind Rafael tower',
     city: 'Indore',
