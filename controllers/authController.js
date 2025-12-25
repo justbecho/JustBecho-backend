@@ -23,16 +23,18 @@ export const signup = async (req, res) => {
       email,
       password: hashedPassword,
       profileCompleted: false,
-      role: 'user'
+      role: 'user',
+      isNewUser: true // ✅ Set isNewUser to true for new signups
     });
 
     await user.save();
 
-    // ✅ UPDATED: Include role in token
+    // ✅ UPDATED: Include isNewUser in token
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      role: user.role // ✅ Added role
+      role: user.role,
+      isNewUser: true // ✅ Include in token
     };
 
     const token = jwt.sign(
@@ -53,7 +55,8 @@ export const signup = async (req, res) => {
         name: user.name || user.email.split('@')[0],
         profileCompleted: user.profileCompleted,
         role: user.role,
-        sellerVerified: user.sellerVerified
+        sellerVerified: user.sellerVerified,
+        isNewUser: true // ✅ Include in response
       },
       redirectTo: '/complete-profile'
     });
@@ -92,11 +95,12 @@ export const login = async (req, res) => {
       });
     }
 
-    // ✅ UPDATED: Include role in token payload
+    // ✅ UPDATED: Include isNewUser in token payload
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      role: user.role // ✅ CRITICAL: Include role!
+      role: user.role,
+      isNewUser: user.isNewUser // ✅ Use actual value from database
     };
 
     console.log('🔐 Token payload being created:', tokenPayload);
@@ -107,7 +111,7 @@ export const login = async (req, res) => {
       { expiresIn: "30d" }
     );
 
-    console.log("✅ Login successful for:", email, "Role:", user.role);
+    console.log("✅ Login successful for:", email, "Role:", user.role, "isNewUser:", user.isNewUser);
     
     let redirectTo = '/dashboard';
     
@@ -126,7 +130,8 @@ export const login = async (req, res) => {
         name: user.name || user.email.split('@')[0],
         username: user.username,
         profileCompleted: user.profileCompleted,
-        role: user.role, // ✅ This should show 'admin' for admin user
+        role: user.role,
+        isNewUser: user.isNewUser, // ✅ Include this flag
         instaId: user.instaId,
         sellerVerified: user.sellerVerified,
         sellerVerificationStatus: user.sellerVerificationStatus,
@@ -299,6 +304,7 @@ export const completeProfile = async (req, res) => {
     user.phone = phone;
     user.address = address;
     user.profileCompleted = true;
+    user.isNewUser = false; // ✅ Set isNewUser to false when profile is completed
 
     if (role === 'influencer') {
       user.instaId = instaId;
@@ -334,11 +340,12 @@ export const completeProfile = async (req, res) => {
     await user.save();
     console.log('✅ Profile completed successfully for user:', user.email);
 
-    // ✅ Generate new token with updated role
+    // ✅ Generate new token with updated role and isNewUser
     const newTokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      role: user.role // Include updated role
+      role: user.role,
+      isNewUser: false // ✅ Update isNewUser in token
     };
 
     const newToken = jwt.sign(
@@ -359,7 +366,8 @@ export const completeProfile = async (req, res) => {
       sellerVerified: user.sellerVerified,
       sellerVerificationStatus: user.sellerVerificationStatus,
       verificationId: user.verificationId,
-      username: user.username
+      username: user.username,
+      isNewUser: false // ✅ Include in response
     };
 
     if (role === 'seller') {
@@ -428,6 +436,7 @@ export const convertToSeller = async (req, res) => {
     user.sellerVerified = false;
     user.sellerVerificationStatus = 'pending';
     user.bankDetails = user.bankDetails || {};
+    user.isNewUser = false; // ✅ Set isNewUser to false
     
     const verificationId = `SELLER-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
     user.verificationId = verificationId;
@@ -444,7 +453,8 @@ export const convertToSeller = async (req, res) => {
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      role: user.role
+      role: user.role,
+      isNewUser: false // ✅ Update isNewUser
     };
     
     const token = jwt.sign(
@@ -471,7 +481,8 @@ export const convertToSeller = async (req, res) => {
         sellerVerificationStatus: user.sellerVerificationStatus,
         verificationId: user.verificationId,
         phone: user.phone,
-        address: user.address
+        address: user.address,
+        isNewUser: false // ✅ Include in response
       },
       redirectTo: '/complete-profile?convertingToSeller=true'
     });
@@ -518,6 +529,7 @@ export const getMe = async (req, res) => {
         username: formattedUsername,
         profileCompleted: user.profileCompleted,
         role: user.role,
+        isNewUser: user.isNewUser, // ✅ Include isNewUser
         instaId: user.instaId,
         sellerVerified: user.sellerVerified,
         sellerVerificationStatus: user.sellerVerificationStatus,
@@ -555,6 +567,7 @@ export const checkProfileStatus = async (req, res) => {
       success: true,
       profileCompleted: user.profileCompleted,
       role: user.role,
+      isNewUser: user.isNewUser, // ✅ Include isNewUser
       instaId: user.instaId,
       sellerVerified: user.sellerVerified,
       sellerVerificationStatus: user.sellerVerificationStatus,
@@ -623,7 +636,8 @@ export const updateProfile = async (req, res) => {
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
-      role: user.role
+      role: user.role,
+      isNewUser: user.isNewUser // ✅ Include isNewUser
     };
 
     const newToken = jwt.sign(
@@ -646,7 +660,8 @@ export const updateProfile = async (req, res) => {
         role: user.role,
         profileCompleted: user.profileCompleted,
         sellerVerified: user.sellerVerified,
-        sellerVerificationStatus: user.sellerVerificationStatus
+        sellerVerificationStatus: user.sellerVerificationStatus,
+        isNewUser: user.isNewUser // ✅ Include isNewUser
       }
     });
 
@@ -754,7 +769,8 @@ export const getSellerStatus = async (req, res) => {
       username: formattedUsername,
       role: user.role,
       name: user.name,
-      email: user.email
+      email: user.email,
+      isNewUser: user.isNewUser // ✅ Include isNewUser
     });
 
   } catch (error) {

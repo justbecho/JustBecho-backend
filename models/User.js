@@ -28,7 +28,13 @@ const userSchema = new mongoose.Schema({
     default: null
   },
   
-  // ✅ UPDATED: ROLE SYSTEM WITH ADMIN
+  // ✅ ADDED: isNewUser field for tracking new users
+  isNewUser: {
+    type: Boolean,
+    default: true
+  },
+  
+  // ✅ ROLE SYSTEM WITH ADMIN
   role: {
     type: String,
     enum: ['user', 'buyer', 'seller', 'influencer', 'admin'],
@@ -143,5 +149,6 @@ userSchema.index({ verificationId: 1 });
 userSchema.index({ 'bankDetails.accountNumber': 1 });
 userSchema.index({ orders: 1 });
 userSchema.index({ soldProducts: 1 });
+userSchema.index({ isNewUser: 1 }); // ✅ Added index for isNewUser
 
 export default mongoose.model("User", userSchema);

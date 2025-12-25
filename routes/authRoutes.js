@@ -17,10 +17,9 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// ✅ Production Configuration - UPDATED
+// ✅ Production Configuration
 const PRODUCTION_CONFIG = {
   clientId: '711574038874-r069ib4ureqbir5sukg69at13hspa9a8.apps.googleusercontent.com',
-  // ✅ CRITICAL FIX: Use correct callback URL format
   backendUrl: 'https://just-becho-backend.vercel.app',
   frontendUrl: 'https://justbecho.com'
 };
@@ -41,7 +40,7 @@ router.put("/profile", authMiddleware, updateProfile);
 router.put("/bank-details", authMiddleware, updateBankDetails);
 router.get("/seller-status", authMiddleware, getSellerStatus);
 
-// ✅ QUICK PROFILE CHECK
+// ✅ PROFILE CHECK
 router.get('/profile/check', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('-password');
@@ -98,7 +97,7 @@ router.get('/profile/check', authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ SINGLE DASHBOARD FOR ALL ROLES
+// ✅ DASHBOARD
 router.get("/dashboard", authMiddleware, (req, res) => {
   try {
     const user = req.user;
@@ -163,7 +162,7 @@ router.get("/dashboard", authMiddleware, (req, res) => {
   }
 });
 
-// ✅ UPDATE PROFILE FOR ALL USERS
+// ✅ UPDATE PROFILE
 router.put("/profile/update", authMiddleware, async (req, res) => {
   try {
     const { name, phone, address } = req.body;
@@ -222,39 +221,14 @@ router.put("/profile/update", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ GOOGLE OAUTH DEBUG ENDPOINT
-router.get('/google/debug', (req, res) => {
-  const frontendUrl = req.query.frontend || PRODUCTION_CONFIG.frontendUrl;
-  // ✅ FIXED: Use backend URL for callback
-  const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
-  
-  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${PRODUCTION_CONFIG.clientId}&` +
-    `redirect_uri=${encodeURIComponent(callbackUrl)}&` +
-    `response_type=code&` +
-    `scope=profile%20email&` +
-    `access_type=offline&` +
-    `prompt=consent&` +
-    `state=${encodeURIComponent(frontendUrl)}`;
-  
-  res.json({
-    success: true,
-    config: PRODUCTION_CONFIG,
-    frontendUrl: frontendUrl,
-    callbackUrl: callbackUrl,
-    googleAuthUrl: googleAuthUrl,
-    testInstructions: 'Copy the googleAuthUrl and paste in browser'
-  });
-});
-
-// ✅ GOOGLE OAUTH INITIATE - FIXED REDIRECT URI MISMATCH
+// ✅ GOOGLE OAUTH - INITIATE
 router.get("/google", (req, res) => {
   console.log('🚀 Google OAuth initiated');
   
   // Get frontend URL from query parameter or use default
   const frontendUrl = req.query.frontend || PRODUCTION_CONFIG.frontendUrl;
   
-  // ✅ CRITICAL FIX: Use BACKEND callback URL (must match Google Console)
+  // ✅ Use BACKEND callback URL (must match Google Console)
   const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
   
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -267,14 +241,13 @@ router.get("/google", (req, res) => {
     `state=${encodeURIComponent(frontendUrl)}`;
   
   console.log('🌐 Google Auth Details:');
-  console.log('   Redirect URI sent to Google:', callbackUrl);
-  console.log('   Frontend URL (for later redirect):', frontendUrl);
-  console.log('   Full Google URL (first 100 chars):', googleAuthUrl.substring(0, 100) + '...');
+  console.log('   Redirect URI:', callbackUrl);
+  console.log('   Frontend URL:', frontendUrl);
   
   res.redirect(googleAuthUrl);
 });
 
-// ✅ UPDATED GOOGLE CALLBACK - WITH isNewUser FLAG
+// ✅ GOOGLE OAUTH CALLBACK - UPDATED WITH isNewUser FLAG
 router.get("/google/callback", async (req, res) => {
   try {
     console.log('🔄 ===== GOOGLE CALLBACK STARTED =====');
@@ -299,25 +272,22 @@ router.get("/google/callback", async (req, res) => {
     
     console.log('✅ Authorization code received');
     
-    // Get Google Client Secret from environment
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     
     if (!clientSecret) {
-      console.error('❌ GOOGLE_CLIENT_SECRET not found in environment');
+      console.error('❌ GOOGLE_CLIENT_SECRET not found');
       
       const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
       return res.redirect(`${frontendUrl}/login?error=missing_config`);
     }
     
-    // ✅ FIXED: Determine frontend URL from state or default
+    // ✅ Determine frontend URL from state
     const frontendUrl = state ? decodeURIComponent(state) : PRODUCTION_CONFIG.frontendUrl;
-    
-    // ✅ CRITICAL FIX: Use SAME callback URL as in the initial request
     const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
     
     console.log('🌐 Callback Details:');
     console.log('   Frontend URL:', frontendUrl);
-    console.log('   Callback URL (for token exchange):', callbackUrl);
+    console.log('   Callback URL:', callbackUrl);
     
     // Exchange code for tokens
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -329,18 +299,15 @@ router.get("/google/callback", async (req, res) => {
         code: code,
         client_id: PRODUCTION_CONFIG.clientId,
         client_secret: clientSecret,
-        redirect_uri: callbackUrl, // ✅ Must match initial request
+        redirect_uri: callbackUrl,
         grant_type: 'authorization_code'
       })
     });
     
     const tokenData = await tokenResponse.json();
-    console.log('Token exchange response:', tokenData);
     
     if (tokenData.error) {
       console.error('❌ Token exchange failed:', tokenData.error);
-      console.error('Token error details:', tokenData.error_description);
-      console.error('Was expecting callback URL:', callbackUrl);
       return res.redirect(`${frontendUrl}/login?error=token_exchange`);
     }
     
@@ -387,7 +354,7 @@ router.get("/google/callback", async (req, res) => {
       console.log('✅ Existing user found');
     }
     
-    // Generate JWT token with isNewUser flag
+    // ✅ Generate JWT token with isNewUser flag
     const tokenPayload = {
       userId: user._id.toString(),
       email: user.email,
@@ -403,15 +370,19 @@ router.get("/google/callback", async (req, res) => {
       { expiresIn: "7d" }
     );
     
-    console.log('✅ JWT token generated, isNewUser:', isNewUser);
-    console.log('👤 User profileCompleted:', user.profileCompleted);
+    console.log('✅ JWT token generated');
+    console.log('👤 User details:', {
+      isNewUser: isNewUser,
+      profileCompleted: user.profileCompleted,
+      role: user.role
+    });
     
-    // ✅ CRITICAL FIX: Different redirect logic
-    let redirectUrl = `${frontendUrl}/`;
+    // ✅ CRITICAL: Different redirect logic based on user status
+    let redirectUrl = `${frontendUrl}`;
     
     if (isNewUser) {
-      // New Google user - go to homepage with role selection trigger
-      redirectUrl = `${frontendUrl}/?token=${jwtToken}&newUser=true&source=google`;
+      // New Google user - go to homepage (role selection will be triggered)
+      redirectUrl = `${frontendUrl}?token=${jwtToken}&newUser=true&source=google`;
       console.log('👶 New Google user, will show role selection');
     } else {
       // Existing user - check profile completion
@@ -419,12 +390,12 @@ router.get("/google/callback", async (req, res) => {
         redirectUrl = `${frontendUrl}/complete-profile?token=${jwtToken}&source=google`;
         console.log('🔄 Existing user, profile not completed');
       } else {
-        redirectUrl = `${frontendUrl}/?token=${jwtToken}&source=google`;
-        console.log('🚀 Existing user with completed profile, redirecting home');
+        redirectUrl = `${frontendUrl}/dashboard?token=${jwtToken}&source=google`;
+        console.log('🚀 Existing user with completed profile, redirecting to dashboard');
       }
     }
     
-    // Add user info
+    // Add user info to URL
     if (user.name) {
       redirectUrl += `&name=${encodeURIComponent(user.name)}`;
     }
@@ -441,8 +412,8 @@ router.get("/google/callback", async (req, res) => {
     console.error('❌ Google callback error:', error);
     console.error('Error stack:', error.stack);
     
-    // Error redirect to frontend
-    res.redirect(`${PRODUCTION_CONFIG.frontendUrl}/?error=auth_failed`);
+    const frontendUrl = PRODUCTION_CONFIG.frontendUrl;
+    res.redirect(`${frontendUrl}/login?error=auth_failed`);
   }
 });
 
@@ -683,100 +654,6 @@ router.put("/verify-seller/:userId", authMiddleware, async (req, res) => {
       message: 'Server error while verifying seller'
     });
   }
-});
-
-// ✅ GOOGLE OAUTH TEST PAGE
-router.get('/test-google', (req, res) => {
-  const frontendUrl = PRODUCTION_CONFIG.frontendUrl;
-  // ✅ FIXED: Use backend URL for callback
-  const callbackUrl = `${PRODUCTION_CONFIG.backendUrl}/api/auth/google/callback`;
-  
-  const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${PRODUCTION_CONFIG.clientId}&` +
-    `redirect_uri=${encodeURIComponent(callbackUrl)}&` +
-    `response_type=code&` +
-    `scope=profile%20email&` +
-    `access_type=offline&` +
-    `prompt=consent&` +
-    `state=${encodeURIComponent(frontendUrl)}`;
-  
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Google OAuth Test</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; }
-        .container { background: #f8f9fa; padding: 20px; border-radius: 10px; }
-        h1 { color: #4285f4; }
-        .step { margin: 20px 0; padding: 15px; border-left: 4px solid #4285f4; background: white; }
-        .success { border-color: #34a853; }
-        .error { border-color: #ea4335; }
-        button { background: #4285f4; color: white; border: none; padding: 12px 24px; cursor: pointer; border-radius: 5px; font-size: 16px; margin: 10px 0; }
-        button:hover { background: #3367d6; }
-        .info { background: #e8f0fe; padding: 10px; border-radius: 5px; margin: 10px 0; }
-        code { background: #f1f3f4; padding: 2px 5px; border-radius: 3px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>🔐 Google OAuth Test Page</h1>
-        
-        <div class="step">
-          <h2>Test 1: Direct Google URL (with correct callback)</h2>
-          <a href="${googleAuthUrl}">
-            <button>Test Google Login (FIXED)</button>
-          </a>
-          <p>This uses the CORRECT callback URL that matches Google Console</p>
-          <div class="info">
-            <p><strong>Callback URL being sent:</strong></p>
-            <code>${callbackUrl}</code>
-            <p><strong>This MUST match what's in Google Console</strong></p>
-          </div>
-        </div>
-        
-        <div class="step">
-          <h2>Test 2: Via Backend Route</h2>
-          <a href="/api/auth/google">
-            <button>Test via Backend Route</button>
-          </a>
-          <p>This uses the backend redirect route (same as frontend)</p>
-        </div>
-        
-        <div class="step">
-          <h2>Debug Information</h2>
-          <div class="info">
-            <p><strong>Client ID:</strong> ${PRODUCTION_CONFIG.clientId.substring(0, 30)}...</p>
-            <p><strong>Backend URL:</strong> ${PRODUCTION_CONFIG.backendUrl}</p>
-            <p><strong>Frontend URL:</strong> ${PRODUCTION_CONFIG.frontendUrl}</p>
-            <p><strong>Callback URL:</strong> ${callbackUrl}</p>
-            <p><strong>Client Secret:</strong> ${process.env.GOOGLE_CLIENT_SECRET ? '✅ Set' : '❌ Missing'}</p>
-            <p><strong>Environment:</strong> ${process.env.NODE_ENV || 'development'}</p>
-          </div>
-        </div>
-        
-        <div class="step">
-          <h2>Test Links</h2>
-          <p><a href="/api/auth/google/debug">Debug Info JSON</a></p>
-          <p><a href="/api/health">Health Check</a></p>
-          <p><a href="/">API Home</a></p>
-        </div>
-        
-        <div class="step success">
-          <h2>✅ Expected Flow After Fix</h2>
-          <p>After Google login, you should be redirected to:</p>
-          <code>${PRODUCTION_CONFIG.frontendUrl}/?token=...&source=google</code>
-          <p><strong>If you still see redirect_uri_mismatch:</strong></p>
-          <ul>
-            <li>Check Google Console redirect URIs</li>
-            <li>Clear browser cache</li>
-            <li>Wait 5 minutes for Google settings to update</li>
-          </ul>
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
 });
 
 export default router;
