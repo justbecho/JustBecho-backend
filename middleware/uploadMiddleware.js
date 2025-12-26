@@ -1,4 +1,4 @@
-// middleware/uploadMiddleware.js - UPDATED WITH 5MB LIMIT
+// middleware/uploadMiddleware.js - UPDATED WITH 5MB LIMIT & HEIF SUPPORT
 import multer from "multer";
 
 console.log('🔄 Upload Middleware Initialized - 5MB LIMIT');
@@ -9,18 +9,33 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    // Check MIME type
-    if (file.mimetype && file.mimetype.startsWith('image/')) {
+    // ✅ UPDATED: Support HEIF/HEIC files
+    const validMimeTypes = [
+      'image/jpeg',
+      'image/jpg', 
+      'image/png',
+      'image/webp',
+      'image/heif',
+      'image/heic',
+      'image/heif-sequence',
+      'image/heic-sequence'
+    ];
+    
+    // Check file extension for HEIF
+    const fileExt = file.originalname.toLowerCase().split('.').pop();
+    const isHEIF = fileExt === 'heif' || fileExt === 'heic';
+    
+    if (validMimeTypes.includes(file.mimetype) || isHEIF) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'), false);
+      cb(new Error('Only image files (JPG, PNG, WebP, HEIF/HEIC) are allowed!'), false);
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024, // ✅ CHANGED: 5MB per file (was 10MB)
+    fileSize: 5 * 1024 * 1024, // ✅ 5MB per file
     files: 5, // Max 5 files
-    parts: 20, // Max form parts
-    headerPairs: 200 // Max header key-value pairs
+    parts: 20,
+    headerPairs: 200
   }
 });
 
