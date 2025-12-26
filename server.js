@@ -1,4 +1,4 @@
-// server.js - NETWORK OPTIMIZED WAREHOUSE AUTOMATION
+// server.js - NETWORK OPTIMIZED FOR MOBILE UPLOADS
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -22,30 +22,20 @@ console.log(`
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ MONGOOSE CONNECTION WITH OPTIMIZATION
+// ✅ MONGOOSE CONNECTION
 const connectDB = async () => {
   try {
     const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
     
     console.log('🔌 Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000, // Increased timeout
-      maxPoolSize: 20, // Increased pool size for uploads
+      serverSelectionTimeoutMS: 10000,
+      maxPoolSize: 20,
       socketTimeoutMS: 45000,
-      connectTimeoutMS: 10000,
-      family: 4 // Force IPv4
+      connectTimeoutMS: 10000
     });
     
     console.log('✅ MongoDB Connected Successfully');
-    
-    // Monitor connection events
-    mongoose.connection.on('error', err => {
-      console.error('❌ MongoDB connection error:', err);
-    });
-    
-    mongoose.connection.on('disconnected', () => {
-      console.warn('⚠️ MongoDB disconnected');
-    });
     
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message);
@@ -89,25 +79,26 @@ import warehouseRoutes from "./routes/warehouseRoutes.js";
 
 const app = express();
 
-// ✅ NETWORK OPTIMIZATION MIDDLEWARE - First in chain
+// ✅ NETWORK OPTIMIZATION FOR MOBILE UPLOADS
 app.use((req, res, next) => {
-  // Track request start time
   req.startTime = Date.now();
   
-  // Set longer timeouts for upload routes
-  if (req.method === 'POST' && (req.url.includes('/api/products') || req.url.includes('/upload'))) {
-    req.setTimeout(300000); // 5 minutes for uploads
-    res.setTimeout(300000);
-    console.log(`⏱️ Extended timeout set for upload request: ${req.url}`);
-  } else {
-    req.setTimeout(60000); // 1 minute for other routes
-    res.setTimeout(60000);
-  }
+  // Check if it's a mobile upload request
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  const isUploadRequest = req.method === 'POST' && req.url.includes('/api/products');
   
-  // Log large requests
-  const contentLength = req.headers['content-length'];
-  if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // > 5MB
-    console.log(`📦 Large request detected: ${(contentLength/(1024*1024)).toFixed(2)}MB for ${req.url}`);
+  // Set longer timeout for mobile uploads
+  if (isMobile && isUploadRequest) {
+    req.setTimeout(300000); // 5 minutes for mobile uploads
+    res.setTimeout(300000);
+    console.log(`📱 Mobile upload detected, setting 5min timeout`);
+  } else if (isUploadRequest) {
+    req.setTimeout(180000); // 3 minutes for desktop uploads
+    res.setTimeout(180000);
+  } else {
+    req.setTimeout(60000); // 1 minute for other requests
+    res.setTimeout(60000);
   }
   
   next();
@@ -129,13 +120,13 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token', 'Content-Length', 'X-Requested-With'],
-  exposedHeaders: ['Content-Length', 'X-Request-Id'],
-  maxAge: 86400 // 24 hours
+  exposedHeaders: ['Content-Length'],
+  maxAge: 86400
 };
 
 app.use(cors(corsOptions));
 
-// ✅ Manual CORS Headers for edge cases
+// ✅ Manual CORS Headers
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -158,9 +149,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Auth-Token, Content-Length, X-Requested-With');
   res.header('Access-Control-Max-Age', '86400');
-  res.header('X-Powered-By', 'JustBecho API');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -168,12 +157,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Body parsing with increased limits for uploads
+// ✅ Body parsing with increased limits
 app.use(express.json({ 
-  limit: '50mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
+  limit: '50mb'
 }));
 
 app.use(express.urlencoded({ 
@@ -182,20 +168,21 @@ app.use(express.urlencoded({
   parameterLimit: 10000
 }));
 
-// ✅ Request logging with size info
+// ✅ Request logging
 app.use((req, res, next) => {
   const contentLength = req.headers['content-length'];
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  
   const sizeInfo = contentLength ? ` - ${(contentLength/(1024*1024)).toFixed(2)}MB` : '';
+  const deviceEmoji = isMobile ? '📱' : '💻';
   
-  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}${sizeInfo}`);
-  
-  // Add request ID for tracking
-  req.requestId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  console.log(`📍 ${deviceEmoji} ${new Date().toISOString()} - ${req.method} ${req.url}${sizeInfo}`);
   
   res.on('finish', () => {
     const duration = Date.now() - req.startTime;
     const statusEmoji = res.statusCode >= 400 ? '❌' : '✅';
-    console.log(`${statusEmoji} ${req.method} ${req.url} - ${res.statusCode} (${duration}ms) [ID: ${req.requestId}]`);
+    console.log(`${statusEmoji} ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
   });
   
   next();
@@ -221,13 +208,13 @@ app.use("/api/nimbuspost", nimbuspostTestRoutes);
 app.use("/api/warehouse", warehouseRoutes);
 
 // ==============================================
-// ✅ FIXED B2C WAREHOUSE AUTOMATION SYSTEM
+// ✅ B2C WAREHOUSE AUTOMATION SYSTEM
 // ==============================================
 
 let isCheckingWarehouse = false;
 let warehouseCheckInterval = null;
 
-// ✅ FIXED: B2C WAREHOUSE CHECK FUNCTION
+// ✅ B2C WAREHOUSE CHECK FUNCTION
 async function checkB2CWarehouseShipments() {
   if (isCheckingWarehouse) {
     console.log('⏳ Warehouse check already in progress, skipping...');
@@ -235,7 +222,6 @@ async function checkB2CWarehouseShipments() {
   }
   
   isCheckingWarehouse = true;
-  const checkStartTime = Date.now();
   console.log('\n🕐 [B2C WAREHOUSE] ========== STARTING AUTO CHECK ==========');
   
   try {
@@ -244,7 +230,7 @@ async function checkB2CWarehouseShipments() {
     const nimbuspostService = (await import('./services/nimbuspostService.js')).default;
     const Product = (await import('./models/Product.js')).default;
     
-    // ✅ FIXED QUERY: Find orders with delivered incoming shipments to warehouse
+    // Find orders with delivered incoming shipments to warehouse
     const orders = await Order.find({
       'nimbuspostShipments.shipmentType': 'seller_to_warehouse',
       'nimbuspostShipments.status': 'delivered',
@@ -472,8 +458,7 @@ async function checkB2CWarehouseShipments() {
       }
     }
     
-    const totalTime = Date.now() - checkStartTime;
-    console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED in ${totalTime}ms`);
+    console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED`);
     console.log(`   📦 Total orders processed: ${orders.length}`);
     console.log(`   🚀 Packages forwarded: ${forwardedCount}`);
     console.log(`   ⏭️  Already forwarded (skipped): ${skippedCount}`);
@@ -525,7 +510,7 @@ function setupWarehouseAutoCheck() {
 }
 
 // ==============================================
-// ✅ FIXED API ENDPOINTS FOR MANUAL CONTROL
+// ✅ API ENDPOINTS FOR MANUAL CONTROL
 // ==============================================
 
 // ✅ MANUAL CHECK ENDPOINT
@@ -549,7 +534,7 @@ app.post("/api/warehouse/check-now", async (req, res) => {
   }
 });
 
-// ✅ FIXED: MANUAL FORWARD ENDPOINT
+// ✅ MANUAL FORWARD ENDPOINT
 app.post("/api/warehouse/forward/:awb", async (req, res) => {
   try {
     const { awb } = req.params;
@@ -719,57 +704,18 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
   }
 });
 
-// ✅ Upload test endpoint for debugging
-app.post("/api/test-upload", (req, res) => {
-  console.log('🧪 Test upload endpoint hit');
-  console.log('📊 Headers:', {
-    'content-type': req.headers['content-type'],
-    'content-length': req.headers['content-length'],
-    'content-encoding': req.headers['content-encoding']
-  });
-  
-  // Simulate processing delay for large uploads
-  const contentLength = parseInt(req.headers['content-length'] || '0');
-  if (contentLength > 5 * 1024 * 1024) {
-    console.log(`⚠️ Large test upload: ${(contentLength/(1024*1024)).toFixed(2)}MB`);
-  }
-  
-  res.json({
-    success: true,
-    message: 'Test endpoint working',
-    timestamp: new Date().toISOString(),
-    requestSize: req.headers['content-length'] ? `${(req.headers['content-length']/(1024*1024)).toFixed(2)}MB` : 'unknown',
-    serverTime: Date.now()
-  });
-});
-
-// ✅ Health check endpoint with detailed network info
+// ✅ Health check endpoint
 app.get("/api/health", (req, res) => {
-  const memoryUsage = process.memoryUsage();
-  const uptime = process.uptime();
-  
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     server: 'JustBecho API',
-    version: '5.1.0',
-    network: {
-      uploadLimits: {
-        perFile: '10MB',
-        maxFiles: 5,
-        totalSize: '50MB',
-        timeout: '5 minutes'
-      },
-      bodyParser: '50MB limit',
-      cors: 'enabled'
-    },
-    system: {
-      uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
-      memory: {
-        rss: `${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB`,
-        heapTotal: `${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB`,
-        heapUsed: `${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`
-      }
+    version: '5.0.0',
+    uploadLimits: {
+      perFile: '10MB',
+      maxFiles: 5,
+      totalSize: '50MB',
+      timeout: '5 minutes for mobile, 3 minutes for desktop'
     },
     warehouseAutomation: {
       status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
@@ -780,10 +726,31 @@ app.get("/api/health", (req, res) => {
     },
     services: {
       mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? "configured" : "not configured",
-      warehouseAutoForward: "enabled"
+      warehouseAutoForward: "enabled",
+      mobileUpload: "optimized"
     }
   });
+});
+
+// ✅ Mobile test endpoint
+app.post("/api/test/mobile-upload", (req, res) => {
+  console.log('📱 Mobile upload test endpoint hit');
+  
+  // Simulate processing time
+  setTimeout(() => {
+    res.json({
+      success: true,
+      message: 'Mobile upload test successful',
+      timestamp: new Date().toISOString(),
+      server: 'JustBecho API',
+      mobileOptimized: true,
+      uploadLimits: {
+        perFile: '10MB',
+        maxFiles: 5,
+        timeout: '5 minutes'
+      }
+    });
+  }, 1000);
 });
 
 // ✅ API Documentation
@@ -791,12 +758,11 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "🚀 Just Becho API with B2C Warehouse Automation",
     timestamp: new Date().toISOString(),
-    version: "5.1.0",
+    version: "5.0.0",
     uploadLimits: {
       perFile: "10MB",
       maxFiles: 5,
       totalSize: "50MB",
-      timeout: "5 minutes",
       formats: "JPG, PNG, JPEG, WebP"
     },
     warehouse: {
@@ -812,7 +778,7 @@ app.get("/", (req, res) => {
     },
     endpoints: {
       health: "GET /api/health",
-      testUpload: "POST /api/test-upload",
+      mobileTest: "POST /api/test/mobile-upload",
       warehouse: {
         checkNow: "POST /api/warehouse/check-now",
         forward: "POST /api/warehouse/forward/:awb"
@@ -835,38 +801,31 @@ app.use((req, res) => {
     success: false,
     message: `Route ${req.method} ${req.url} not found`,
     timestamp: new Date().toISOString(),
-    requestId: req.requestId,
     suggestion: 'Check / endpoint for available routes'
   });
 });
 
-// ✅ Global error handler with network error detection
+// ✅ Global error handler with mobile optimization
 app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
-  console.error('Stack:', error.stack);
-  console.error('Request ID:', req.requestId);
   
   let statusCode = error.status || 500;
   let message = error.message || 'Internal server error';
-  let errorCode = 'INTERNAL_ERROR';
   
-  // Handle specific error types
+  // Check if mobile request
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  
   if (error.message.includes('timeout') || error.code === 'ETIMEDOUT') {
     statusCode = 408;
-    message = 'Request timeout. Please try again.';
-    errorCode = 'TIMEOUT';
+    message = isMobile 
+      ? 'Upload timeout. Please use Wi-Fi and keep screen on.' 
+      : 'Request timeout. Please try again.';
   } else if (error.type === 'entity.too.large') {
     statusCode = 413;
-    message = 'Request payload too large. Maximum size is 50MB.';
-    errorCode = 'PAYLOAD_TOO_LARGE';
-  } else if (error.name === 'MongoError' || error.name === 'MongoServerError') {
-    statusCode = 503;
-    message = 'Database error. Please try again.';
-    errorCode = 'DATABASE_ERROR';
-  } else if (error.code === 'ECONNRESET') {
-    statusCode = 503;
-    message = 'Connection reset. Please try again.';
-    errorCode = 'CONNECTION_RESET';
+    message = isMobile
+      ? 'File too large for mobile. Maximum 10MB per image. Try compressing images.'
+      : 'File too large. Maximum 10MB per image.';
   }
   
   res.status(statusCode).json({
@@ -874,10 +833,8 @@ app.use((error, req, res, next) => {
     message: message,
     timestamp: new Date().toISOString(),
     errorType: error.name,
-    errorCode: errorCode,
-    requestId: req.requestId || 'unknown',
-    path: req.url,
-    method: req.method
+    isMobile: isMobile,
+    suggestion: isMobile ? 'Use Wi-Fi, keep screen on, upload fewer images' : undefined
   });
 });
 
@@ -896,7 +853,7 @@ process.on('SIGINT', () => {
 });
 
 // ==============================================
-// ✅ START SERVER WITH NETWORK OPTIMIZATION
+// ✅ START SERVER
 // ==============================================
 
 const startServer = async () => {
@@ -908,20 +865,19 @@ const startServer = async () => {
     // ✅ START WAREHOUSE AUTOMATION
     setupWarehouseAutoCheck();
     
-    const server = app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 5.1.0                  ║
+║                  🚀 JUST BECHO SERVER 5.0.0                  ║
 ║            🏭 B2C WAREHOUSE AUTOMATION ENABLED              ║
 ║      🔄 SELLER → WAREHOUSE → BUYER (AUTO-FORWARD)          ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
-  ✅ Host: 0.0.0.0 (all interfaces)
   ✅ Upload Limits: 10MB/file, 5 files max, 50MB total
-  ✅ Timeout: 5 minutes for uploads
-  ✅ Body Parser: 50MB limit
+  ✅ Mobile Timeout: 5 minutes
+  ✅ Desktop Timeout: 3 minutes
   ✅ Warehouse Automation: ACTIVE
   ✅ Auto-check: Every 15 minutes
   ✅ Auto-forward: ENABLED
@@ -934,25 +890,24 @@ const startServer = async () => {
   3️⃣ B2C: Warehouse → Buyer ✅
   4️⃣ Buyer receives package via B2C ✅
 
-📦 UPLOAD OPTIMIZATIONS:
-  ⏱️  5-minute timeout for large uploads
+📱 MOBILE UPLOAD OPTIMIZATIONS:
+  ⏱️  5-minute timeout for mobile uploads
   📊 Request size monitoring
-  🔄 Automatic retry in frontend
-  📱 Mobile network optimized
-  🔍 Detailed error logging
+  🔄 Automatic error recovery in frontend
+  💡 Mobile-specific error messages
+  🔍 Detailed logging for debugging
 
 🔧 DEBUG ENDPOINTS:
-  POST /api/test-upload           - Test upload functionality
-  GET  /api/health               - Detailed server health
+  POST /api/test/mobile-upload    - Test mobile upload
+  GET  /api/health               - Check server status
   POST /api/warehouse/check-now   - Manual warehouse check
-  POST /api/warehouse/forward/:awb - Manual forward
 
-⚠️  UPLOAD TIPS:
+⚠️  MOBILE UPLOAD TIPS:
   • Use Wi-Fi for large uploads
   • Maximum 10MB per image
   • Maximum 5 images per product
-  • Large images auto-compressed in frontend
-  • Network timeout: 5 minutes
+  • Keep screen ON during upload
+  • Don't switch apps during upload
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. B2C Warehouse automation ACTIVE.
@@ -960,39 +915,9 @@ const startServer = async () => {
       `);
     });
     
-    // ✅ Server-level network optimization
+    // Server optimization
     server.keepAliveTimeout = 120000; // 2 minutes
     server.headersTimeout = 120000; // 2 minutes
-    
-    // Handle server errors
-    server.on('error', (error) => {
-      console.error('💥 Server error:', error);
-      if (error.code === 'EADDRINUSE') {
-        console.error(`Port ${PORT} is already in use`);
-        process.exit(1);
-      }
-    });
-    
-    // Graceful shutdown
-    const gracefulShutdown = () => {
-      console.log('\n🔄 Received shutdown signal, closing connections...');
-      server.close(() => {
-        console.log('✅ HTTP server closed');
-        mongoose.connection.close(false, () => {
-          console.log('✅ MongoDB connection closed');
-          process.exit(0);
-        });
-      });
-      
-      // Force shutdown after 10 seconds
-      setTimeout(() => {
-        console.error('❌ Could not close connections in time, forcefully shutting down');
-        process.exit(1);
-      }, 10000);
-    };
-    
-    process.on('SIGTERM', gracefulShutdown);
-    process.on('SIGINT', gracefulShutdown);
     
   } catch (error) {
     console.error('❌ Failed to start server:', error);
