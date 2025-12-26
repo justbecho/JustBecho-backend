@@ -1,7 +1,7 @@
-// middleware/uploadMiddleware.js - FINAL FIXED VERSION
+// middleware/uploadMiddleware.js - UPDATED WITH 5MB LIMIT
 import multer from "multer";
 
-console.log('🔄 Upload Middleware Initialized');
+console.log('🔄 Upload Middleware Initialized - 5MB LIMIT');
 
 // ✅ MEMORY STORAGE
 const storage = multer.memoryStorage();
@@ -17,7 +17,7 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB per file
+    fileSize: 5 * 1024 * 1024, // ✅ CHANGED: 5MB per file (was 10MB)
     files: 5, // Max 5 files
     parts: 20, // Max form parts
     headerPairs: 200 // Max header key-value pairs
@@ -30,6 +30,7 @@ const uploadMiddleware = (req, res, next) => {
   console.log(`📊 Content-Type: ${req.headers['content-type']}`);
   console.log(`📦 Content-Length: ${req.headers['content-length'] ? `${(req.headers['content-length']/(1024*1024)).toFixed(2)}MB` : 'Unknown'}`);
   console.log(`👤 User: ${req.user?.id || 'Unknown'}`);
+  console.log(`⚡ Limits: 5MB per file, 5 files max`);
   
   // ✅ Set longer timeout for uploads
   req.setTimeout(300000); // 5 minutes
@@ -45,12 +46,12 @@ const uploadMiddleware = (req, res, next) => {
       if (err instanceof multer.MulterError) {
         switch (err.code) {
           case 'LIMIT_FILE_SIZE':
-            console.error('  Detail: Individual file exceeds 10MB limit');
+            console.error('  Detail: Individual file exceeds 5MB limit');
             return res.status(413).json({
               success: false,
-              message: 'File too large. Maximum size is 10MB per image.',
-              details: 'Each image must be under 10MB',
-              limit: '10MB per file',
+              message: 'File too large. Maximum size is 5MB per image.', // ✅ CHANGED
+              details: 'Each image must be under 5MB', // ✅ CHANGED
+              limit: '5MB per file', // ✅ CHANGED
               code: 'FILE_TOO_LARGE'
             });
           
@@ -134,9 +135,17 @@ const uploadMiddleware = (req, res, next) => {
       console.log(`  📦 Total size: ${(totalSize/(1024*1024)).toFixed(2)}MB`);
       console.log(`  ⏰ Request duration: ${Date.now() - req.startTime || 'Unknown'}ms`);
       
-      // ✅ Add size validation (optional)
-      if (totalSize > 50 * 1024 * 1024) {
-        console.warn('⚠️ Warning: Total size exceeds 50MB');
+      // ✅ Add size validation (25MB total)
+      const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25MB total
+      if (totalSize > MAX_TOTAL_SIZE) {
+        console.error('❌ Total size exceeds 25MB limit');
+        return res.status(413).json({
+          success: false,
+          message: 'Total upload size exceeds 25MB limit.',
+          details: `Total: ${(totalSize/(1024*1024)).toFixed(2)}MB, Limit: 25MB`,
+          limit: '25MB total',
+          code: 'TOTAL_SIZE_EXCEEDED'
+        });
       }
     } else {
       console.log('⚠️ No files received in this request');
