@@ -1,4 +1,4 @@
-// middleware/uploadMiddleware.js - FIXED VERSION
+// middleware/uploadMiddleware.js - FINAL FIXED VERSION
 import multer from "multer";
 
 console.log('🔄 Upload Middleware Initialized');
@@ -17,60 +17,133 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-    files: 5 // Max 5 files
+    fileSize: 10 * 1024 * 1024, // 10MB per file
+    files: 5, // Max 5 files
+    parts: 20, // Max form parts
+    headerPairs: 200 // Max header key-value pairs
   }
 });
 
 const uploadMiddleware = (req, res, next) => {
-  console.log('📤 Upload middleware processing request...');
+  console.log('\n📤 ===== UPLOAD REQUEST START =====');
+  console.log(`🌐 Method: ${req.method}, URL: ${req.url}`);
+  console.log(`📊 Content-Type: ${req.headers['content-type']}`);
+  console.log(`📦 Content-Length: ${req.headers['content-length'] ? `${(req.headers['content-length']/(1024*1024)).toFixed(2)}MB` : 'Unknown'}`);
+  console.log(`👤 User: ${req.user?.id || 'Unknown'}`);
+  
+  // ✅ Set longer timeout for uploads
+  req.setTimeout(300000); // 5 minutes
+  res.setTimeout(300000);
   
   upload.array('images', 5)(req, res, function (err) {
     if (err) {
-      console.error('❌ Upload error:', err.message);
+      console.error('❌ UPLOAD ERROR DETAILS:');
+      console.error('  Message:', err.message);
+      console.error('  Code:', err.code);
+      console.error('  Stack:', err.stack);
       
       if (err instanceof multer.MulterError) {
         switch (err.code) {
           case 'LIMIT_FILE_SIZE':
-            return res.status(400).json({
+            console.error('  Detail: Individual file exceeds 10MB limit');
+            return res.status(413).json({
               success: false,
-              message: 'File too large. Maximum size is 10MB per image.'
+              message: 'File too large. Maximum size is 10MB per image.',
+              details: 'Each image must be under 10MB',
+              limit: '10MB per file',
+              code: 'FILE_TOO_LARGE'
             });
           
           case 'LIMIT_FILE_COUNT':
             return res.status(400).json({
               success: false,
-              message: 'Too many files. Maximum 5 images allowed.'
+              message: 'Too many files. Maximum 5 images allowed.',
+              limit: 5,
+              code: 'TOO_MANY_FILES'
             });
           
           case 'LIMIT_UNEXPECTED_FILE':
             return res.status(400).json({
               success: false,
-              message: 'Unexpected file field. Use "images" field for uploads.'
+              message: 'Unexpected file field. Use "images" field for uploads.',
+              expectedField: 'images',
+              code: 'UNEXPECTED_FIELD'
+            });
+          
+          case 'LIMIT_PART_COUNT':
+            return res.status(413).json({
+              success: false,
+              message: 'Request has too many parts. Try with fewer images.',
+              code: 'TOO_MANY_PARTS'
+            });
+          
+          case 'LIMIT_FIELD_KEY':
+            return res.status(400).json({
+              success: false,
+              message: 'Field name too long.',
+              code: 'FIELD_NAME_TOO_LONG'
+            });
+          
+          case 'LIMIT_FIELD_VALUE':
+            return res.status(400).json({
+              success: false,
+              message: 'Field value too long.',
+              code: 'FIELD_VALUE_TOO_LONG'
+            });
+          
+          case 'LIMIT_FIELD_COUNT':
+            return res.status(400).json({
+              success: false,
+              message: 'Too many form fields.',
+              code: 'TOO_MANY_FIELDS'
             });
           
           default:
+            console.error('  Unknown Multer Error:', err.code);
             return res.status(400).json({
               success: false,
-              message: `Upload error: ${err.message}`
+              message: `Upload error: ${err.message}`,
+              code: err.code || 'UNKNOWN_MULTER_ERROR'
             });
         }
       }
       
+      // Non-Multer errors
       return res.status(400).json({
         success: false,
-        message: `File upload error: ${err.message}`
+        message: `File upload error: ${err.message}`,
+        type: 'UPLOAD_ERROR',
+        code: 'UPLOAD_FAILED'
       });
     }
     
     // ✅ SAFE: Check if files were uploaded
     if (req.files && Array.isArray(req.files)) {
-      console.log(`✅ Upload successful: ${req.files.length} files received`);
+      console.log(`✅ UPLOAD SUCCESS: ${req.files.length} files received`);
+      
+      let totalSize = 0;
+      req.files.forEach((file, i) => {
+        const sizeMB = file.size / (1024 * 1024);
+        totalSize += file.size;
+        console.log(`  📄 File ${i+1}: ${file.originalname}`);
+        console.log(`     Size: ${sizeMB.toFixed(2)}MB`);
+        console.log(`     Type: ${file.mimetype}`);
+        console.log(`     Field: ${file.fieldname}`);
+      });
+      
+      console.log(`  📦 Total size: ${(totalSize/(1024*1024)).toFixed(2)}MB`);
+      console.log(`  ⏰ Request duration: ${Date.now() - req.startTime || 'Unknown'}ms`);
+      
+      // ✅ Add size validation (optional)
+      if (totalSize > 50 * 1024 * 1024) {
+        console.warn('⚠️ Warning: Total size exceeds 50MB');
+      }
     } else {
-      console.log('⚠️ No files received');
+      console.log('⚠️ No files received in this request');
       req.files = []; // Ensure it's always an array
     }
     
+    console.log('📤 ===== UPLOAD REQUEST END =====\n');
     next();
   });
 };

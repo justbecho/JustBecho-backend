@@ -1,4 +1,4 @@
-// server.js - FIXED WAREHOUSE AUTOMATION
+// server.js - NETWORK OPTIMIZED WAREHOUSE AUTOMATION
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -22,18 +22,31 @@ console.log(`
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ MONGOOSE CONNECTION
+// ✅ MONGOOSE CONNECTION WITH OPTIMIZATION
 const connectDB = async () => {
   try {
     const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
     
     console.log('🔌 Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-      maxPoolSize: 10
+      serverSelectionTimeoutMS: 10000, // Increased timeout
+      maxPoolSize: 20, // Increased pool size for uploads
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 10000,
+      family: 4 // Force IPv4
     });
     
     console.log('✅ MongoDB Connected Successfully');
+    
+    // Monitor connection events
+    mongoose.connection.on('error', err => {
+      console.error('❌ MongoDB connection error:', err);
+    });
+    
+    mongoose.connection.on('disconnected', () => {
+      console.warn('⚠️ MongoDB disconnected');
+    });
+    
   } catch (error) {
     console.error('❌ MongoDB Connection Error:', error.message);
     process.exit(1);
@@ -76,6 +89,30 @@ import warehouseRoutes from "./routes/warehouseRoutes.js";
 
 const app = express();
 
+// ✅ NETWORK OPTIMIZATION MIDDLEWARE - First in chain
+app.use((req, res, next) => {
+  // Track request start time
+  req.startTime = Date.now();
+  
+  // Set longer timeouts for upload routes
+  if (req.method === 'POST' && (req.url.includes('/api/products') || req.url.includes('/upload'))) {
+    req.setTimeout(300000); // 5 minutes for uploads
+    res.setTimeout(300000);
+    console.log(`⏱️ Extended timeout set for upload request: ${req.url}`);
+  } else {
+    req.setTimeout(60000); // 1 minute for other routes
+    res.setTimeout(60000);
+  }
+  
+  // Log large requests
+  const contentLength = req.headers['content-length'];
+  if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // > 5MB
+    console.log(`📦 Large request detected: ${(contentLength/(1024*1024)).toFixed(2)}MB for ${req.url}`);
+  }
+  
+  next();
+});
+
 // ✅ CORS Configuration
 const corsOptions = {
   origin: [
@@ -91,12 +128,14 @@ const corsOptions = {
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token', 'Content-Length', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  maxAge: 86400 // 24 hours
 };
 
 app.use(cors(corsOptions));
 
-// ✅ Manual CORS Headers
+// ✅ Manual CORS Headers for edge cases
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -116,9 +155,12 @@ app.use((req, res, next) => {
   }
   
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type', 'Authorization', 'x-api-key', 'X-Auth-Token');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Auth-Token, Content-Length, X-Requested-With');
+  res.header('Access-Control-Max-Age', '86400');
+  res.header('X-Powered-By', 'JustBecho API');
   
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -126,18 +168,34 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Body parsing
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// ✅ Body parsing with increased limits for uploads
+app.use(express.json({ 
+  limit: '50mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
-// ✅ Request logging
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '50mb',
+  parameterLimit: 10000
+}));
+
+// ✅ Request logging with size info
 app.use((req, res, next) => {
-  const startTime = Date.now();
-  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  const contentLength = req.headers['content-length'];
+  const sizeInfo = contentLength ? ` - ${(contentLength/(1024*1024)).toFixed(2)}MB` : '';
+  
+  console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}${sizeInfo}`);
+  
+  // Add request ID for tracking
+  req.requestId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
   
   res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    console.log(`✅ ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+    const duration = Date.now() - req.startTime;
+    const statusEmoji = res.statusCode >= 400 ? '❌' : '✅';
+    console.log(`${statusEmoji} ${req.method} ${req.url} - ${res.statusCode} (${duration}ms) [ID: ${req.requestId}]`);
   });
   
   next();
@@ -177,6 +235,7 @@ async function checkB2CWarehouseShipments() {
   }
   
   isCheckingWarehouse = true;
+  const checkStartTime = Date.now();
   console.log('\n🕐 [B2C WAREHOUSE] ========== STARTING AUTO CHECK ==========');
   
   try {
@@ -413,7 +472,8 @@ async function checkB2CWarehouseShipments() {
       }
     }
     
-    console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED`);
+    const totalTime = Date.now() - checkStartTime;
+    console.log(`\n✅ [WAREHOUSE] AUTO CHECK COMPLETED in ${totalTime}ms`);
     console.log(`   📦 Total orders processed: ${orders.length}`);
     console.log(`   🚀 Packages forwarded: ${forwardedCount}`);
     console.log(`   ⏭️  Already forwarded (skipped): ${skippedCount}`);
@@ -659,13 +719,58 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
   }
 });
 
-// ✅ Health check endpoint
+// ✅ Upload test endpoint for debugging
+app.post("/api/test-upload", (req, res) => {
+  console.log('🧪 Test upload endpoint hit');
+  console.log('📊 Headers:', {
+    'content-type': req.headers['content-type'],
+    'content-length': req.headers['content-length'],
+    'content-encoding': req.headers['content-encoding']
+  });
+  
+  // Simulate processing delay for large uploads
+  const contentLength = parseInt(req.headers['content-length'] || '0');
+  if (contentLength > 5 * 1024 * 1024) {
+    console.log(`⚠️ Large test upload: ${(contentLength/(1024*1024)).toFixed(2)}MB`);
+  }
+  
+  res.json({
+    success: true,
+    message: 'Test endpoint working',
+    timestamp: new Date().toISOString(),
+    requestSize: req.headers['content-length'] ? `${(req.headers['content-length']/(1024*1024)).toFixed(2)}MB` : 'unknown',
+    serverTime: Date.now()
+  });
+});
+
+// ✅ Health check endpoint with detailed network info
 app.get("/api/health", (req, res) => {
+  const memoryUsage = process.memoryUsage();
+  const uptime = process.uptime();
+  
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
     server: 'JustBecho API',
-    version: '5.0.0',
+    version: '5.1.0',
+    network: {
+      uploadLimits: {
+        perFile: '10MB',
+        maxFiles: 5,
+        totalSize: '50MB',
+        timeout: '5 minutes'
+      },
+      bodyParser: '50MB limit',
+      cors: 'enabled'
+    },
+    system: {
+      uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
+      memory: {
+        rss: `${(memoryUsage.rss / 1024 / 1024).toFixed(2)}MB`,
+        heapTotal: `${(memoryUsage.heapTotal / 1024 / 1024).toFixed(2)}MB`,
+        heapUsed: `${(memoryUsage.heapUsed / 1024 / 1024).toFixed(2)}MB`
+      }
+    },
     warehouseAutomation: {
       status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
       method: "setInterval",
@@ -675,6 +780,7 @@ app.get("/api/health", (req, res) => {
     },
     services: {
       mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+      cloudinary: process.env.CLOUDINARY_CLOUD_NAME ? "configured" : "not configured",
       warehouseAutoForward: "enabled"
     }
   });
@@ -685,7 +791,14 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "🚀 Just Becho API with B2C Warehouse Automation",
     timestamp: new Date().toISOString(),
-    version: "5.0.0",
+    version: "5.1.0",
+    uploadLimits: {
+      perFile: "10MB",
+      maxFiles: 5,
+      totalSize: "50MB",
+      timeout: "5 minutes",
+      formats: "JPG, PNG, JPEG, WebP"
+    },
     warehouse: {
       name: "JustBecho Warehouse",
       location: "Indore, Madhya Pradesh",
@@ -699,9 +812,14 @@ app.get("/", (req, res) => {
     },
     endpoints: {
       health: "GET /api/health",
+      testUpload: "POST /api/test-upload",
       warehouse: {
         checkNow: "POST /api/warehouse/check-now",
         forward: "POST /api/warehouse/forward/:awb"
+      },
+      products: {
+        create: "POST /api/products",
+        limits: "10MB per file, 5 files max"
       },
       orders: {
         create: "POST /api/razorpay/create-order",
@@ -717,19 +835,49 @@ app.use((req, res) => {
     success: false,
     message: `Route ${req.method} ${req.url} not found`,
     timestamp: new Date().toISOString(),
+    requestId: req.requestId,
     suggestion: 'Check / endpoint for available routes'
   });
 });
 
-// ✅ Global error handler
+// ✅ Global error handler with network error detection
 app.use((error, req, res, next) => {
   console.error('💥 Global error:', error.message);
+  console.error('Stack:', error.stack);
+  console.error('Request ID:', req.requestId);
   
-  res.status(error.status || 500).json({
+  let statusCode = error.status || 500;
+  let message = error.message || 'Internal server error';
+  let errorCode = 'INTERNAL_ERROR';
+  
+  // Handle specific error types
+  if (error.message.includes('timeout') || error.code === 'ETIMEDOUT') {
+    statusCode = 408;
+    message = 'Request timeout. Please try again.';
+    errorCode = 'TIMEOUT';
+  } else if (error.type === 'entity.too.large') {
+    statusCode = 413;
+    message = 'Request payload too large. Maximum size is 50MB.';
+    errorCode = 'PAYLOAD_TOO_LARGE';
+  } else if (error.name === 'MongoError' || error.name === 'MongoServerError') {
+    statusCode = 503;
+    message = 'Database error. Please try again.';
+    errorCode = 'DATABASE_ERROR';
+  } else if (error.code === 'ECONNRESET') {
+    statusCode = 503;
+    message = 'Connection reset. Please try again.';
+    errorCode = 'CONNECTION_RESET';
+  }
+  
+  res.status(statusCode).json({
     success: false,
-    message: error.message || 'Internal server error',
+    message: message,
     timestamp: new Date().toISOString(),
-    errorType: error.name
+    errorType: error.name,
+    errorCode: errorCode,
+    requestId: req.requestId || 'unknown',
+    path: req.url,
+    method: req.method
   });
 });
 
@@ -748,7 +896,7 @@ process.on('SIGINT', () => {
 });
 
 // ==============================================
-// ✅ START SERVER
+// ✅ START SERVER WITH NETWORK OPTIMIZATION
 // ==============================================
 
 const startServer = async () => {
@@ -760,16 +908,20 @@ const startServer = async () => {
     // ✅ START WAREHOUSE AUTOMATION
     setupWarehouseAutoCheck();
     
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║                  🚀 JUST BECHO SERVER 5.0.0                  ║
+║                  🚀 JUST BECHO SERVER 5.1.0                  ║
 ║            🏭 B2C WAREHOUSE AUTOMATION ENABLED              ║
 ║      🔄 SELLER → WAREHOUSE → BUYER (AUTO-FORWARD)          ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
+  ✅ Host: 0.0.0.0 (all interfaces)
+  ✅ Upload Limits: 10MB/file, 5 files max, 50MB total
+  ✅ Timeout: 5 minutes for uploads
+  ✅ Body Parser: 50MB limit
   ✅ Warehouse Automation: ACTIVE
   ✅ Auto-check: Every 15 minutes
   ✅ Auto-forward: ENABLED
@@ -782,22 +934,66 @@ const startServer = async () => {
   3️⃣ B2C: Warehouse → Buyer ✅
   4️⃣ Buyer receives package via B2C ✅
 
-🔧 WAREHOUSE ENDPOINTS:
-  POST /api/warehouse/check-now          - Force check now
-  POST /api/warehouse/forward/:awb       - Manual forward specific AWB
-  GET  /api/health                       - Check server status
+📦 UPLOAD OPTIMIZATIONS:
+  ⏱️  5-minute timeout for large uploads
+  📊 Request size monitoring
+  🔄 Automatic retry in frontend
+  📱 Mobile network optimized
+  🔍 Detailed error logging
 
-📦 SHIPMENT DETAILS:
-  📮 Shipment Mode: B2C
-  🔄 Flow: Two-leg B2C via Warehouse
-  ⚡ Automation: Fully Automatic
-  📊 Tracking: Real-time via NimbusPost API
+🔧 DEBUG ENDPOINTS:
+  POST /api/test-upload           - Test upload functionality
+  GET  /api/health               - Detailed server health
+  POST /api/warehouse/check-now   - Manual warehouse check
+  POST /api/warehouse/forward/:awb - Manual forward
+
+⚠️  UPLOAD TIPS:
+  • Use Wi-Fi for large uploads
+  • Maximum 10MB per image
+  • Maximum 5 images per product
+  • Large images auto-compressed in frontend
+  • Network timeout: 5 minutes
 
 ──────────────────────────────────────────────────────────────
 ✅ Server is running. B2C Warehouse automation ACTIVE.
 ──────────────────────────────────────────────────────────────
       `);
     });
+    
+    // ✅ Server-level network optimization
+    server.keepAliveTimeout = 120000; // 2 minutes
+    server.headersTimeout = 120000; // 2 minutes
+    
+    // Handle server errors
+    server.on('error', (error) => {
+      console.error('💥 Server error:', error);
+      if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use`);
+        process.exit(1);
+      }
+    });
+    
+    // Graceful shutdown
+    const gracefulShutdown = () => {
+      console.log('\n🔄 Received shutdown signal, closing connections...');
+      server.close(() => {
+        console.log('✅ HTTP server closed');
+        mongoose.connection.close(false, () => {
+          console.log('✅ MongoDB connection closed');
+          process.exit(0);
+        });
+      });
+      
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        console.error('❌ Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+      }, 10000);
+    };
+    
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+    
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
