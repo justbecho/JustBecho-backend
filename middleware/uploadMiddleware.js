@@ -49,9 +49,9 @@ const uploadMiddleware = (req, res, next) => {
             console.error('  Detail: Individual file exceeds 5MB limit');
             return res.status(413).json({
               success: false,
-              message: 'File too large. Maximum size is 5MB per image.', // ✅ CHANGED
-              details: 'Each image must be under 5MB', // ✅ CHANGED
-              limit: '5MB per file', // ✅ CHANGED
+              message: 'File too large. Maximum size is 5MB per image.',
+              details: 'Each image must be under 5MB',
+              limit: '5MB per file',
               code: 'FILE_TOO_LARGE'
             });
           
