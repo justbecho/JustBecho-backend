@@ -1,7 +1,7 @@
-// middleware/uploadMiddleware.js - UPDATED WITH 5MB LIMIT & HEIF SUPPORT
+// middleware/uploadMiddleware.js - UPDATED WITH 10MB LIMIT & HEIF SUPPORT
 import multer from "multer";
 
-console.log('🔄 Upload Middleware Initialized - 5MB LIMIT');
+console.log('🔄 Upload Middleware Initialized - 10MB LIMIT');
 
 // ✅ MEMORY STORAGE
 const storage = multer.memoryStorage();
@@ -25,14 +25,17 @@ const upload = multer({
     const fileExt = file.originalname.toLowerCase().split('.').pop();
     const isHEIF = fileExt === 'heif' || fileExt === 'heic';
     
+    // Accept both the MIME type and file extension for HEIF
     if (validMimeTypes.includes(file.mimetype) || isHEIF) {
+      console.log(`✅ Accepting file: ${file.originalname}, type: ${file.mimetype}, extension: ${fileExt}`);
       cb(null, true);
     } else {
+      console.log(`❌ Rejecting file: ${file.originalname}, type: ${file.mimetype}`);
       cb(new Error('Only image files (JPG, PNG, WebP, HEIF/HEIC) are allowed!'), false);
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024, // ✅ 5MB per file
+    fileSize: 10 * 1024 * 1024, // ✅ 10MB per file
     files: 5, // Max 5 files
     parts: 20,
     headerPairs: 200
@@ -45,7 +48,7 @@ const uploadMiddleware = (req, res, next) => {
   console.log(`📊 Content-Type: ${req.headers['content-type']}`);
   console.log(`📦 Content-Length: ${req.headers['content-length'] ? `${(req.headers['content-length']/(1024*1024)).toFixed(2)}MB` : 'Unknown'}`);
   console.log(`👤 User: ${req.user?.id || 'Unknown'}`);
-  console.log(`⚡ Limits: 5MB per file, 5 files max`);
+  console.log(`⚡ Limits: 10MB per file, 5 files max`);
   
   // ✅ Set longer timeout for uploads
   req.setTimeout(300000); // 5 minutes
@@ -61,12 +64,12 @@ const uploadMiddleware = (req, res, next) => {
       if (err instanceof multer.MulterError) {
         switch (err.code) {
           case 'LIMIT_FILE_SIZE':
-            console.error('  Detail: Individual file exceeds 5MB limit');
+            console.error('  Detail: Individual file exceeds 10MB limit');
             return res.status(413).json({
               success: false,
-              message: 'File too large. Maximum size is 5MB per image.',
-              details: 'Each image must be under 5MB',
-              limit: '5MB per file',
+              message: 'File too large. Maximum size is 10MB per image.',
+              details: 'Each image must be under 10MB',
+              limit: '10MB per file',
               code: 'FILE_TOO_LARGE'
             });
           
@@ -145,20 +148,21 @@ const uploadMiddleware = (req, res, next) => {
         console.log(`     Size: ${sizeMB.toFixed(2)}MB`);
         console.log(`     Type: ${file.mimetype}`);
         console.log(`     Field: ${file.fieldname}`);
+        console.log(`     HEIF/HEIC: ${file.originalname.toLowerCase().endsWith('.heif') || file.originalname.toLowerCase().endsWith('.heic') ? 'Yes' : 'No'}`);
       });
       
       console.log(`  📦 Total size: ${(totalSize/(1024*1024)).toFixed(2)}MB`);
       console.log(`  ⏰ Request duration: ${Date.now() - req.startTime || 'Unknown'}ms`);
       
-      // ✅ Add size validation (25MB total)
-      const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25MB total
+      // ✅ Add size validation (50MB total)
+      const MAX_TOTAL_SIZE = 50 * 1024 * 1024; // 50MB total
       if (totalSize > MAX_TOTAL_SIZE) {
-        console.error('❌ Total size exceeds 25MB limit');
+        console.error('❌ Total size exceeds 50MB limit');
         return res.status(413).json({
           success: false,
-          message: 'Total upload size exceeds 25MB limit.',
-          details: `Total: ${(totalSize/(1024*1024)).toFixed(2)}MB, Limit: 25MB`,
-          limit: '25MB total',
+          message: 'Total upload size exceeds 50MB limit.',
+          details: `Total: ${(totalSize/(1024*1024)).toFixed(2)}MB, Limit: 50MB`,
+          limit: '50MB total',
           code: 'TOTAL_SIZE_EXCEEDED'
         });
       }

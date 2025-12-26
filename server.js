@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
+import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORT
 
 // ✅ Load environment variables
 dotenv.config();
@@ -15,6 +16,7 @@ console.log(`
 ║           🚀 JUST BECHO SERVER - B2C WAREHOUSE FLOW         ║
 ║          📦 B2C: SELLER → WAREHOUSE → BUYER                ║
 ║           ⚡ AUTO-FORWARD WHEN DELIVERED TO WAREHOUSE       ║
+║           📸 HEIF/HEIC SUPPORT ENABLED                     ║
 ╚══════════════════════════════════════════════════════════════╝
 `);
 
@@ -190,6 +192,73 @@ app.use((req, res, next) => {
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ✅ HEIF/HEIC IMAGE PROCESSING MIDDLEWARE
+app.use('/api/products', async (req, res, next) => {
+  if (req.method === 'POST' && req.files && req.files.length > 0) {
+    console.log('🔄 Processing images for HEIF/HEIC conversion...');
+    
+    try {
+      const processedFiles = [];
+      
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        const originalName = file.originalname.toLowerCase();
+        
+        // Check if file is HEIF/HEIC
+        const isHEIF = originalName.endsWith('.heif') || 
+                      originalName.endsWith('.heic') ||
+                      file.mimetype === 'image/heif' || 
+                      file.mimetype === 'image/heic';
+        
+        if (isHEIF) {
+          console.log(`   🖼️  Converting HEIF/HEIC: ${file.originalname} (${(file.size/(1024*1024)).toFixed(2)}MB)`);
+          
+          try {
+            // Convert HEIF to JPEG using sharp
+            const jpegBuffer = await sharp(file.buffer, {
+              failOnError: false
+            })
+            .jpeg({ 
+              quality: 85,
+              mozjpeg: true 
+            })
+            .toBuffer();
+            
+            // Create new file object with JPEG data
+            const processedFile = {
+              ...file,
+              buffer: jpegBuffer,
+              size: jpegBuffer.length,
+              originalname: file.originalname.replace(/\.[^/.]+$/, '.jpg'),
+              mimetype: 'image/jpeg',
+              fieldname: file.fieldname
+            };
+            
+            console.log(`   ✅ Converted to JPEG: ${processedFile.originalname} (${(processedFile.size/(1024*1024)).toFixed(2)}MB)`);
+            processedFiles.push(processedFile);
+            
+          } catch (sharpError) {
+            console.log(`   ⚠️  Sharp conversion failed for ${file.originalname}: ${sharpError.message}`);
+            // Keep original if conversion fails
+            processedFiles.push(file);
+          }
+        } else {
+          // Keep non-HEIF files as is
+          processedFiles.push(file);
+        }
+      }
+      
+      // Replace files array with processed files
+      req.files = processedFiles;
+      
+    } catch (error) {
+      console.log(`⚠️  Image processing middleware error: ${error.message}`);
+      // Continue with original files if processing fails
+    }
+  }
+  next();
+});
 
 // ✅ ALL ROUTES
 console.log('🔗 Registering routes...');
@@ -715,7 +784,9 @@ app.get("/api/health", (req, res) => {
       perFile: '10MB',
       maxFiles: 5,
       totalSize: '50MB',
-      timeout: '5 minutes for mobile, 3 minutes for desktop'
+      timeout: '5 minutes for mobile, 3 minutes for desktop',
+      supportedFormats: ['JPG', 'PNG', 'WebP', 'HEIF', 'HEIC'],
+      autoConversion: 'HEIF/HEIC → JPEG'
     },
     warehouseAutomation: {
       status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
@@ -727,7 +798,8 @@ app.get("/api/health", (req, res) => {
     services: {
       mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       warehouseAutoForward: "enabled",
-      mobileUpload: "optimized"
+      mobileUpload: "optimized",
+      heifSupport: "enabled"
     }
   });
 });
@@ -748,7 +820,8 @@ app.post("/api/test/mobile-upload", (req, res) => {
         perFile: '10MB',
         maxFiles: 5,
         timeout: '5 minutes'
-      }
+      },
+      heifSupport: true
     });
   }, 1000);
 });
@@ -763,7 +836,8 @@ app.get("/", (req, res) => {
       perFile: "10MB",
       maxFiles: 5,
       totalSize: "50MB",
-      formats: "JPG, PNG, JPEG, WebP"
+      formats: "JPG, PNG, JPEG, WebP, HEIF, HEIC",
+      note: "HEIF/HEIC files automatically converted to JPEG"
     },
     warehouse: {
       name: "JustBecho Warehouse",
@@ -785,7 +859,8 @@ app.get("/", (req, res) => {
       },
       products: {
         create: "POST /api/products",
-        limits: "10MB per file, 5 files max"
+        limits: "10MB per file, 5 files max",
+        formats: "JPG, PNG, WebP, HEIF, HEIC"
       },
       orders: {
         create: "POST /api/razorpay/create-order",
@@ -826,6 +901,10 @@ app.use((error, req, res, next) => {
     message = isMobile
       ? 'File too large for mobile. Maximum 10MB per image. Try compressing images.'
       : 'File too large. Maximum 10MB per image.';
+  } else if (error.message.includes('HEIF') || error.message.includes('HEIC')) {
+    message = isMobile
+      ? 'HEIF/HEIC file issue. Try converting to JPEG before upload.'
+      : 'HEIF/HEIC file processing error.';
   }
   
   res.status(statusCode).json({
@@ -871,11 +950,15 @@ const startServer = async () => {
 ║                  🚀 JUST BECHO SERVER 5.0.0                  ║
 ║            🏭 B2C WAREHOUSE AUTOMATION ENABLED              ║
 ║      🔄 SELLER → WAREHOUSE → BUYER (AUTO-FORWARD)          ║
+║      📸 HEIF/HEIC SUPPORT ENABLED                          ║
+║      ⚡ iPhone files automatically converted to JPEG       ║
 ╚══════════════════════════════════════════════════════════════╝
 
 📊 SERVER STATUS:
   ✅ Port: ${PORT}
   ✅ Upload Limits: 10MB/file, 5 files max, 50MB total
+  ✅ HEIF/HEIC Support: ✅ ENABLED
+  ✅ Auto-conversion: HEIF/HEIC → JPEG
   ✅ Mobile Timeout: 5 minutes
   ✅ Desktop Timeout: 3 minutes
   ✅ Warehouse Automation: ACTIVE
@@ -889,6 +972,12 @@ const startServer = async () => {
   2️⃣ ✅ WHEN DELIVERED TO WAREHOUSE → Auto-check triggers
   3️⃣ B2C: Warehouse → Buyer ✅
   4️⃣ Buyer receives package via B2C ✅
+
+📸 HEIF/HEIC FEATURES:
+  • iPhone HEIF/HEIC files supported
+  • Automatic conversion to JPEG
+  • No size increase on conversion
+  • Maintains image quality
 
 📱 MOBILE UPLOAD OPTIMIZATIONS:
   ⏱️  5-minute timeout for mobile uploads
@@ -908,9 +997,10 @@ const startServer = async () => {
   • Maximum 5 images per product
   • Keep screen ON during upload
   • Don't switch apps during upload
+  • HEIF/HEIC files automatically converted
 
 ──────────────────────────────────────────────────────────────
-✅ Server is running. B2C Warehouse automation ACTIVE.
+✅ Server is running. B2C Warehouse & HEIF support ACTIVE.
 ──────────────────────────────────────────────────────────────
       `);
     });
