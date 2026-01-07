@@ -136,11 +136,8 @@ const createProduct = async (req, res) => {
       });
     }
 
-    let platformFeePercentage = 15;
-    if (price <= 2000) platformFeePercentage = 30;
-    else if (price <= 5000) platformFeePercentage = 28;
-    else if (price <= 10000) platformFeePercentage = 25;
-    else if (price <= 15000) platformFeePercentage = 20;
+    // ✅ FIXED 10% PLATFORM FEE FOR ALL PRODUCTS
+    const platformFeePercentage = 10; // ✅ Fixed 10% for all price ranges
 
     const feeAmount = (price * platformFeePercentage) / 100;
     const finalPrice = Math.ceil(price + feeAmount);
@@ -816,6 +813,15 @@ const updateProduct = async (req, res) => {
     
     if (updateData.category) {
       updateData.category = strictCategoryMapping(updateData.category);
+    }
+    
+    // ✅ FIXED 10% PLATFORM FEE FOR ALL PRODUCTS
+    if (updateData.askingPrice) {
+      const price = parseFloat(updateData.askingPrice);
+      const platformFeePercentage = 10; // ✅ Fixed 10%
+      const feeAmount = (price * platformFeePercentage) / 100;
+      updateData.finalPrice = Math.ceil(price + feeAmount);
+      updateData.platformFee = platformFeePercentage;
     }
     
     if (req.files && req.files.length > 0) {

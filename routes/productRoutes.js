@@ -34,12 +34,7 @@ router.get("/category/:category", getProductsByCategory);
 router.get("/featured", getFeaturedProducts);
 router.get("/search", searchProducts);
 
-// ============================================
-// ✅ PROTECTED ROUTES - REQUIRE AUTHENTICATION
-// ============================================
 
-// ✅ USER: Get my products (authenticated users only)
-// ⚠️ MUST COME BEFORE THE GENERIC :id ROUTE!
 router.get("/my-products", authMiddleware, getUserProducts);
 
 // ✅ USER: Create new product (authenticated users only)

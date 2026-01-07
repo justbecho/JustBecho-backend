@@ -93,19 +93,8 @@ cartSchema.methods.calculateAndSave = async function() {
 cartSchema.methods.getCheckoutTotals = function() {
   const SHIPPING_CHARGE = 299;
   
-  // Platform fee calculation (hidden from user)
-  let platformFeePercentage = 0;
-  if (this.subtotal <= 2000) {
-    platformFeePercentage = 30;
-  } else if (this.subtotal >= 2001 && this.subtotal <= 5000) {
-    platformFeePercentage = 28;
-  } else if (this.subtotal >= 5001 && this.subtotal <= 10000) {
-    platformFeePercentage = 25;
-  } else if (this.subtotal >= 10001 && this.subtotal <= 15000) {
-    platformFeePercentage = 20;
-  } else {
-    platformFeePercentage = 15;
-  }
+  // ✅ Platform fee calculation (hidden from user) - FIXED 10%
+  const platformFeePercentage = 10; // ✅ Fixed 10% for all orders
   
   const platformFee = Math.round((this.subtotal * platformFeePercentage) / 100);
   const gst = Math.round(platformFee * 0.18); // 18% GST on platform fee
