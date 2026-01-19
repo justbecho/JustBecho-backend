@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
-import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORT
+import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORt
 
 // ✅ Load environment variables
 dotenv.config();
