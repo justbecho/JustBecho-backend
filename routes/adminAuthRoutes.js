@@ -5,17 +5,18 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// ✅ SET DEFAULT ADMIN PASSWORD HASH (admin123)
-const DEFAULT_ADMIN_PASSWORD_HASH = "$2a$10$JixWQdS3c4D/vn7LkMZt6.SXi2KY./6BJVWqPmR4h6fq8RkG4vHJa"; // admin123
-
-// ✅ ADMIN LOGIN - FIXED VERSION
+// ✅ ADMIN LOGIN - FIXED WITH YOUR ENV
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     console.log('👑 Admin login attempt:', email);
 
-    // ✅ IMPORTANT: Allow default admin credentials
+    // ✅ IMPORTANT: Use environment JWT_SECRET
+    const JWT_SECRET = process.env.JWT_SECRET || "supersecretjustbecho";
+    console.log('🔑 Using JWT_SECRET:', JWT_SECRET ? 'Set' : 'Not set');
+
+    // ✅ Allow default admin credentials
     if (email === "admin@justbecho.com" && password === "admin123") {
       console.log('✅ Using default admin credentials');
       
@@ -47,9 +48,11 @@ router.post("/login", async (req, res) => {
           role: user.role,
           name: user.name
         },
-        process.env.JWT_SECRET || "your_jwt_secret_here",
+        JWT_SECRET,
         { expiresIn: "24h" }
       );
+
+      console.log('✅ Admin login successful, token generated');
 
       res.json({
         success: true,
@@ -68,6 +71,7 @@ router.post("/login", async (req, res) => {
     // ✅ Check if user exists for other emails
     const user = await User.findOne({ email });
     if (!user) {
+      console.log('❌ User not found:', email);
       return res.status(400).json({
         success: false,
         message: "Invalid credentials"
@@ -76,6 +80,7 @@ router.post("/login", async (req, res) => {
 
     // ✅ Check if user is admin
     if (user.role !== 'admin') {
+      console.log('❌ User is not admin. Role:', user.role);
       return res.status(403).json({
         success: false,
         message: "Access denied. Admin only."
@@ -85,6 +90,7 @@ router.post("/login", async (req, res) => {
     // ✅ Verify password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      console.log('❌ Password mismatch');
       return res.status(400).json({
         success: false,
         message: "Invalid credentials"
@@ -99,7 +105,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
         name: user.name
       },
-      process.env.JWT_SECRET || "your_jwt_secret_here",
+      JWT_SECRET,
       { expiresIn: "24h" }
     );
 
@@ -126,14 +132,12 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ✅ GET ADMIN PROFILE - FIXED VERSION
+// ✅ GET ADMIN PROFILE
 router.get("/profile", async (req, res) => {
   try {
     console.log('🔍 Admin profile request received');
-    console.log('Headers:', req.headers);
     
     const authHeader = req.headers.authorization;
-    console.log('Auth Header:', authHeader);
     
     if (!authHeader) {
       console.log('❌ No authorization header');
@@ -147,7 +151,7 @@ router.get("/profile", async (req, res) => {
       ? authHeader.split(' ')[1] 
       : authHeader;
     
-    console.log('Token received:', token.substring(0, 20) + '...');
+    console.log('Token received:', token ? token.substring(0, 20) + '...' : 'No token');
 
     if (!token) {
       console.log('❌ Token not found in header');
@@ -157,9 +161,12 @@ router.get("/profile", async (req, res) => {
       });
     }
 
+    // ✅ Use environment JWT_SECRET
+    const JWT_SECRET = process.env.JWT_SECRET || "supersecretjustbecho";
+
     // ✅ Verify token
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "your_jwt_secret_here");
+      const decoded = jwt.verify(token, JWT_SECRET);
       console.log('✅ Token decoded:', decoded);
       
       const user = await User.findById(decoded.userId).select("-password");
@@ -215,16 +222,23 @@ router.get("/profile", async (req, res) => {
 router.put("/change-password", async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    const token = req.headers.authorization?.split(" ")[1];
+    const authHeader = req.headers.authorization;
     
-    if (!token) {
+    if (!authHeader) {
       return res.status(401).json({
         success: false,
         message: "No token provided"
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "your_jwt_secret_here");
+    const token = authHeader.startsWith('Bearer ') 
+      ? authHeader.split(' ')[1] 
+      : authHeader;
+
+    // ✅ Use environment JWT_SECRET
+    const JWT_SECRET = process.env.JWT_SECRET || "supersecretjustbecho";
+
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.userId);
     
     if (!user || user.role !== 'admin') {
@@ -260,6 +274,14 @@ router.put("/change-password", async (req, res) => {
       message: "Server error"
     });
   }
+});
+
+// ✅ ADMIN LOGOUT
+router.post("/logout", (req, res) => {
+  res.json({
+    success: true,
+    message: "Admin logged out successfully"
+  });
 });
 
 export default router;

@@ -10,10 +10,10 @@ import Wishlist from "../models/Wishlist.js";
 const router = express.Router();
 
 // ✅ ADMIN AUTH MIDDLEWARE - FIXED VERSION
+// ✅ ADMIN AUTH MIDDLEWARE - FIXED WITH YOUR ENV
 const adminAuth = async (req, res, next) => {
   try {
     console.log('🔍 Admin auth middleware checking...');
-    console.log('Headers:', req.headers);
     
     const authHeader = req.headers.authorization;
     
@@ -39,9 +39,13 @@ const adminAuth = async (req, res, next) => {
       });
     }
 
+    // ✅ Use environment JWT_SECRET
+    const JWT_SECRET = process.env.JWT_SECRET || "supersecretjustbecho";
+    console.log('🔑 Using JWT_SECRET:', JWT_SECRET ? 'Set' : 'Not set');
+
     // ✅ Verify token
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "justbecho_admin_secret_key_2024");
+      const decoded = jwt.verify(token, JWT_SECRET);
       console.log('✅ Token decoded:', decoded);
       
       const user = await User.findById(decoded.userId);
