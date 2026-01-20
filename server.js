@@ -8,6 +8,10 @@ import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
 import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORT
 
+// ✅ Import middleware
+import authMiddleware from "./middleware/authMiddleware.js";
+import adminAuthMiddleware from "./middleware/adminAuthMiddleware.js";
+
 // ✅ Load environment variables
 dotenv.config();
 
@@ -27,7 +31,7 @@ const __dirname = path.dirname(__filename);
 // ✅ MONGOOSE CONNECTION
 const connectDB = async () => {
   try {
-    const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
+    const MONGODB_URI = process.env.MONGO_URI || "mongodb+srv://Karan:Karan2021@justbecho-cluster.cbqu2mf.mongodb.net/justbecho?retryWrites=true&w=majority";
     
     console.log('🔌 Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI, {
@@ -264,38 +268,77 @@ app.use('/api/products', async (req, res, next) => {
   next();
 });
 
-// ✅ ALL ROUTES
+// ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+// ✅ IMPORTANT: REGISTER ROUTES IN CORRECT ORDER WITH PROPER MIDDLEWARE
+// ✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅
+
 console.log('🔗 Registering routes...');
-app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/wishlist", wishlistRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/cart", cartRoutes);
-app.use("/api/admin", adminRoutes);
+
+// ========================
+// ✅ PUBLIC ROUTES (NO AUTH)
+// ========================
+app.use("/api/auth", authRoutes); // User authentication
+app.use("/api/admin/auth", adminAuthRoutes); // Admin authentication (login)
+app.use("/api/products", productRoutes); // Product browsing (public)
+app.use("/api/categories", categoryRoutes); // Categories (public)
+app.use("/api/health", (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    server: 'JustBecho API'
+  });
+});
+
+// ========================
+// ✅ PROTECTED USER ROUTES (REQUIRE AUTH)
+// ========================
+app.use("/api/users", authMiddleware, userRoutes);
+app.use("/api/cart", authMiddleware, cartRoutes);
+app.use("/api/orders", authMiddleware, orderRoutes);
+app.use("/api/wishlist", authMiddleware, wishlistRoutes);
+
+// ========================
+// ✅ ADMIN PROTECTED ROUTES (REQUIRE ADMIN AUTH)
+// ========================
+app.use("/api/admin/dashboard", adminAuthMiddleware, adminDashboardRoutes);
+app.use("/api/admin", adminAuthMiddleware, adminRoutes); // Other admin routes
+
+// ========================
+// ✅ OTHER ROUTES
+// ========================
 app.use("/api/razorpay", razorpayOrderRoutes);
 app.use("/api/razorpay", razorpayVerifyRoutes);
-app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api/nimbuspost", nimbuspostTestRoutes);
 app.use("/api/warehouse", warehouseRoutes);
 
-// ✅ REGISTER ADMIN ROUTES
-app.use("/api/admin/auth", adminAuthRoutes);
-app.use("/api/admin/dashboard", adminDashboardRoutes);
+// ========================
+// ✅ ADMIN REDIRECT & HEALTH
+// ========================
 
-// ✅ ADMIN ROUTE FOR justbecho.com/admin
+// ✅ Admin redirect
 app.get("/admin", (req, res) => {
   res.redirect('https://justbecho.com/admin');
 });
 
-// ✅ Admin API health check
+// ✅ Admin API health check (public)
 app.get("/api/admin/health", (req, res) => {
   res.json({
     success: true,
     message: "Admin API is running",
     timestamp: new Date().toISOString(),
-    version: "1.0.0"
+    version: "1.0.0",
+    endpoints: {
+      public: {
+        login: "POST /api/admin/auth/login",
+        health: "GET /api/admin/health"
+      },
+      protected: {
+        dashboard: "GET /api/admin/dashboard/stats",
+        users: "GET /api/admin/dashboard/users",
+        products: "GET /api/admin/dashboard/products"
+      }
+    }
   });
 });
 
@@ -796,44 +839,6 @@ app.post("/api/warehouse/forward/:awb", async (req, res) => {
   }
 });
 
-// ✅ Health check endpoint
-app.get("/api/health", (req, res) => {
-  res.json({ 
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    server: 'JustBecho API',
-    version: '5.0.0',
-    uploadLimits: {
-      perFile: '10MB',
-      maxFiles: 5,
-      totalSize: '50MB',
-      timeout: '5 minutes for mobile, 3 minutes for desktop',
-      supportedFormats: ['JPG', 'PNG', 'WebP', 'HEIF', 'HEIC'],
-      autoConversion: 'HEIF/HEIC → JPEG'
-    },
-    adminPanel: {
-      auth: '/api/admin/auth',
-      dashboard: '/api/admin/dashboard',
-      health: '/api/admin/health',
-      frontend: 'https://justbecho.com/admin'
-    },
-    warehouseAutomation: {
-      status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
-      method: "setInterval",
-      interval: "15 minutes",
-      isRunning: isCheckingWarehouse,
-      lastCheck: new Date().toISOString()
-    },
-    services: {
-      mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-      warehouseAutoForward: "enabled",
-      mobileUpload: "optimized",
-      heifSupport: "enabled",
-      adminRoutes: "enabled"
-    }
-  });
-});
-
 // ✅ Mobile test endpoint
 app.post("/api/test/mobile-upload", (req, res) => {
   console.log('📱 Mobile upload test endpoint hit');
@@ -870,9 +875,9 @@ app.get("/", (req, res) => {
       note: "HEIF/HEIC files automatically converted to JPEG"
     },
     adminPanel: {
-      auth: "/api/admin/auth",
-      dashboard: "/api/admin/dashboard",
-      health: "/api/admin/health",
+      auth: "/api/admin/auth (PUBLIC)",
+      dashboard: "/api/admin/dashboard (PROTECTED)",
+      health: "/api/admin/health (PUBLIC)",
       frontend: "https://justbecho.com/admin"
     },
     warehouse: {
@@ -887,21 +892,18 @@ app.get("/", (req, res) => {
       flow: "Seller → Warehouse (B2C) → Auto-check → Warehouse → Buyer (B2C)"
     },
     endpoints: {
-      health: "GET /api/health",
-      adminHealth: "GET /api/admin/health",
-      mobileTest: "POST /api/test/mobile-upload",
-      warehouse: {
-        checkNow: "POST /api/warehouse/check-now",
-        forward: "POST /api/warehouse/forward/:awb"
+      public: {
+        auth: "POST /api/auth/login",
+        adminAuth: "POST /api/admin/auth/login",
+        health: "GET /api/health",
+        products: "GET /api/products",
+        categories: "GET /api/categories"
       },
-      products: {
-        create: "POST /api/products",
-        limits: "10MB per file, 5 files max",
-        formats: "JPG, PNG, WebP, HEIF, HEIC"
-      },
-      orders: {
-        create: "POST /api/razorpay/create-order",
-        verify: "POST /api/razorpay/verify-payment"
+      protected: {
+        users: "GET /api/users",
+        cart: "GET /api/cart",
+        orders: "GET /api/orders",
+        adminDashboard: "GET /api/admin/dashboard/stats"
       }
     }
   });
@@ -1001,15 +1003,21 @@ const startServer = async () => {
   ✅ Warehouse Automation: ACTIVE
   ✅ Auto-check: Every 15 minutes
   ✅ Auto-forward: ENABLED
-  ✅ Admin Routes: ✅ ENABLED
+  ✅ Admin Routes: ✅ PROPERLY CONFIGURED
   ✅ Database: Connected
   ✅ B2C Flow: Seller → Warehouse → Buyer
 
-🏢 ADMIN PANEL:
-  🔐 /api/admin/auth
-  📊 /api/admin/dashboard
-  ❤️ /api/admin/health
-  🌐 https://justbecho.com/admin
+🏢 ADMIN PANEL ROUTES:
+  🔐 PUBLIC: /api/admin/auth/login
+  📊 PROTECTED: /api/admin/dashboard/*
+  ❤️ PUBLIC: /api/admin/health
+  🌐 Frontend: https://justbecho.com/admin
+
+🔐 AUTHENTICATION SETUP:
+  ✅ User Auth: /api/auth/*
+  ✅ Admin Auth: /api/admin/auth/*
+  ✅ Protected User Routes: /api/users, /api/cart, /api/orders
+  ✅ Protected Admin Routes: /api/admin/dashboard, /api/admin/*
 
 🏭 B2C WAREHOUSE FLOW (AUTOMATIC):
   1️⃣ B2C: Seller → Warehouse ✅
@@ -1045,7 +1053,7 @@ const startServer = async () => {
   • HEIF/HEIC files automatically converted
 
 ──────────────────────────────────────────────────────────────
-✅ Server is running. B2C Warehouse, HEIF & Admin support ACTIVE.
+✅ Server is running. All routes properly configured.
 ──────────────────────────────────────────────────────────────
       `);
     });
