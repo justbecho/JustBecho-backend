@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { v2 as cloudinary } from 'cloudinary';
-import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORt
+import sharp from 'sharp'; // ✅ ADDED FOR HEIF/HEIC SUPPORT
 
 // ✅ Load environment variables
 dotenv.config();
@@ -78,6 +78,10 @@ import orderRoutes from "./routes/orderRoutes.js";
 import nimbuspostTestRoutes from "./routes/nimbuspostTest.js";
 import shippingRoutes from "./routes/shippingRoutes.js";
 import warehouseRoutes from "./routes/warehouseRoutes.js";
+
+// ✅ IMPORT ADMIN ROUTES
+import adminAuthRoutes from "./routes/adminAuthRoutes.js";
+import adminDashboardRoutes from "./routes/adminDashboardRoutes.js";
 
 const app = express();
 
@@ -275,6 +279,25 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api/nimbuspost", nimbuspostTestRoutes);
 app.use("/api/warehouse", warehouseRoutes);
+
+// ✅ REGISTER ADMIN ROUTES
+app.use("/api/admin/auth", adminAuthRoutes);
+app.use("/api/admin/dashboard", adminDashboardRoutes);
+
+// ✅ ADMIN ROUTE FOR justbecho.com/admin
+app.get("/admin", (req, res) => {
+  res.redirect('https://justbecho.com/admin');
+});
+
+// ✅ Admin API health check
+app.get("/api/admin/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "Admin API is running",
+    timestamp: new Date().toISOString(),
+    version: "1.0.0"
+  });
+});
 
 // ==============================================
 // ✅ B2C WAREHOUSE AUTOMATION SYSTEM
@@ -788,6 +811,12 @@ app.get("/api/health", (req, res) => {
       supportedFormats: ['JPG', 'PNG', 'WebP', 'HEIF', 'HEIC'],
       autoConversion: 'HEIF/HEIC → JPEG'
     },
+    adminPanel: {
+      auth: '/api/admin/auth',
+      dashboard: '/api/admin/dashboard',
+      health: '/api/admin/health',
+      frontend: 'https://justbecho.com/admin'
+    },
     warehouseAutomation: {
       status: warehouseCheckInterval ? "ACTIVE" : "INACTIVE",
       method: "setInterval",
@@ -799,7 +828,8 @@ app.get("/api/health", (req, res) => {
       mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       warehouseAutoForward: "enabled",
       mobileUpload: "optimized",
-      heifSupport: "enabled"
+      heifSupport: "enabled",
+      adminRoutes: "enabled"
     }
   });
 });
@@ -839,6 +869,12 @@ app.get("/", (req, res) => {
       formats: "JPG, PNG, JPEG, WebP, HEIF, HEIC",
       note: "HEIF/HEIC files automatically converted to JPEG"
     },
+    adminPanel: {
+      auth: "/api/admin/auth",
+      dashboard: "/api/admin/dashboard",
+      health: "/api/admin/health",
+      frontend: "https://justbecho.com/admin"
+    },
     warehouse: {
       name: "JustBecho Warehouse",
       location: "Indore, Madhya Pradesh",
@@ -852,6 +888,7 @@ app.get("/", (req, res) => {
     },
     endpoints: {
       health: "GET /api/health",
+      adminHealth: "GET /api/admin/health",
       mobileTest: "POST /api/test/mobile-upload",
       warehouse: {
         checkNow: "POST /api/warehouse/check-now",
@@ -964,8 +1001,15 @@ const startServer = async () => {
   ✅ Warehouse Automation: ACTIVE
   ✅ Auto-check: Every 15 minutes
   ✅ Auto-forward: ENABLED
+  ✅ Admin Routes: ✅ ENABLED
   ✅ Database: Connected
   ✅ B2C Flow: Seller → Warehouse → Buyer
+
+🏢 ADMIN PANEL:
+  🔐 /api/admin/auth
+  📊 /api/admin/dashboard
+  ❤️ /api/admin/health
+  🌐 https://justbecho.com/admin
 
 🏭 B2C WAREHOUSE FLOW (AUTOMATIC):
   1️⃣ B2C: Seller → Warehouse ✅
@@ -989,6 +1033,7 @@ const startServer = async () => {
 🔧 DEBUG ENDPOINTS:
   POST /api/test/mobile-upload    - Test mobile upload
   GET  /api/health               - Check server status
+  GET  /api/admin/health         - Admin health check
   POST /api/warehouse/check-now   - Manual warehouse check
 
 ⚠️  MOBILE UPLOAD TIPS:
@@ -1000,7 +1045,7 @@ const startServer = async () => {
   • HEIF/HEIC files automatically converted
 
 ──────────────────────────────────────────────────────────────
-✅ Server is running. B2C Warehouse & HEIF support ACTIVE.
+✅ Server is running. B2C Warehouse, HEIF & Admin support ACTIVE.
 ──────────────────────────────────────────────────────────────
       `);
     });
