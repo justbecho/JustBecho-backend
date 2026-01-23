@@ -38,14 +38,22 @@ try {
           receipt: options.receipt,
           status: 'created'
         };
+      },
+      fetch: async (orderId) => {
+        return {
+          id: orderId,
+          amount: 10000,
+          currency: 'INR',
+          status: 'created'
+        };
       }
     }
   };
 }
 
-// ✅ CREATE ORDER - MAIN ENDPOINT (FIXED)
+// ✅ CREATE RAZORPAY ORDER ONLY (NO DATABASE ORDER YET)
 router.post('/create-order', authMiddleware, async (req, res) => {
-  console.log('📦 [RAZORPAY] Creating order request received');
+  console.log('📦 [RAZORPAY] Creating payment order (NO DB order yet)');
   
   try {
     const { amount, cartId, shippingAddress } = req.body;
@@ -73,7 +81,7 @@ router.post('/create-order', authMiddleware, async (req, res) => {
     console.log('🛒 Cart found:', cart._id);
     console.log('💰 Converting amount:', amount, 'to paise:', Math.round(amount * 100));
 
-    // ✅ Create Razorpay order
+    // ✅ Create Razorpay order ONLY
     const razorpayOrderData = {
       amount: Math.round(amount * 100),
       currency: 'INR',
@@ -95,134 +103,55 @@ router.post('/create-order', authMiddleware, async (req, res) => {
       });
     }
 
-    // ✅ Build order data
-    const orderData = {
-      user: userId,
-      cart: cartId,
-      totalAmount: amount,
+    // ✅ DO NOT CREATE DATABASE ORDER HERE
+    // Save temp data for frontend only
+    const tempOrderData = {
       razorpayOrderId: razorpayOrder.id,
-      status: 'pending',
-      buyer: userId,
+      cartId: cartId,
+      userId: userId,
+      totalAmount: amount,
+      shippingAddress: shippingAddress,
       createdAt: new Date(),
-      updatedAt: new Date()
+      items: cart.items.map(item => ({
+        product: item.product?._id,
+        quantity: item.quantity,
+        price: item.price,
+        bechoProtect: item.bechoProtect
+      }))
     };
 
-    // Add shipping address if provided
-    if (shippingAddress) {
-      orderData.shippingAddress = {
-        name: shippingAddress.name || req.user.name || 'Customer',
-        phone: shippingAddress.phone || req.user.phone || '',
-        email: shippingAddress.email || req.user.email || '',
-        street: shippingAddress.street || '',
-        city: shippingAddress.city || '',
-        state: shippingAddress.state || '',
-        pincode: shippingAddress.pincode || '',
-        country: 'India',
-        landmark: shippingAddress.landmark || ''
-      };
-    }
+    console.log('📦 Temp order data saved (not in DB yet)');
 
-    // Add items from cart
-    if (cart.items && cart.items.length > 0) {
-      orderData.items = cart.items.map(item => ({
-        product: item.product?._id || item.product,
-        quantity: item.quantity || 1,
-        price: item.price || 0,
-        bechoProtect: item.bechoProtect || { selected: false, price: 0 },
-        totalPrice: (item.price || 0) * (item.quantity || 1),
-        productDetails: item.product ? {
-          name: item.product.productName || '',
-          brand: item.product.brand || '',
-          images: item.product.images || [],
-          condition: item.product.condition || '',
-          weight: item.product.weight || 0
-        } : {}
-      }));
-      
-      // Extract products
-      orderData.products = cart.items
-        .map(item => item.product?._id)
-        .filter(Boolean);
-      
-      // Get seller from first product
-      if (cart.items[0]?.product?.seller) {
-        orderData.seller = cart.items[0].product.seller;
-      }
-    }
-
-    // ✅ B2C WAREHOUSE METADATA
-    orderData.metadata = {
-      cartItemsCount: cart.items?.length || 0,
-      bechoProtectApplied: false,
-      shippingCharges: 0,
-      taxAmount: 0,
-      discountAmount: 0,
-      shipmentMode: 'B2C',
-      autoForwardEnabled: true,
-      shippingFlow: 'seller_to_warehouse_to_buyer',
-      warehouse: {
-        name: 'JustBecho Warehouse',
-        address: '103 Dilpasand grand, Behind Rafael tower',
-        city: 'Indore',
-        state: 'Madhya Pradesh',
-        pincode: '452001',
-        contact: 'Devansh Kothari - 9301847748'
-      },
-      trackingJobs: [],
-      preferredCourier: 'delhivery',
-      deliveryType: 'surface'
-    };
-
-    console.log('📦 Creating database order...');
-
-    // ✅ FIXED: Create order using Model.create() with proper error handling
-    let savedOrder;
-    try {
-      // Option 1: Try using Model.create() with validateBeforeSave: false
-      savedOrder = await Order.create([orderData], { 
-        validateBeforeSave: false 
-      });
-      
-      savedOrder = savedOrder[0]; // Create returns array
-      console.log('✅ Order created via Model.create():', savedOrder._id);
-      
-    } catch (createError) {
-      console.log('⚠️ Model.create() failed, trying manual insert...');
-      
-      // Option 2: Manual insert if Model.create fails
-      try {
-        const db = mongoose.connection.db;
-        const result = await db.collection('orders').insertOne(orderData);
-        
-        // Fetch the created order
-        savedOrder = await Order.findById(result.insertedId);
-        console.log('✅ Order created via manual insert:', savedOrder._id);
-        
-      } catch (insertError) {
-        console.error('❌ Manual insert also failed:', insertError.message);
-        throw new Error('Order creation failed: ' + insertError.message);
-      }
-    }
-
-    // ✅ SUCCESS RESPONSE
+    // ✅ SUCCESS RESPONSE - NO DATABASE ORDER CREATED
     res.json({
       success: true,
-      message: 'Order created successfully',
+      message: 'Payment order created. Complete payment to place order.',
       order: {
         id: razorpayOrder.id,
         amount: razorpayOrder.amount,
         currency: razorpayOrder.currency,
         receipt: razorpayOrder.receipt,
-        status: razorpayOrder.status,
-        databaseOrderId: savedOrder._id,
-        razorpayOrderId: razorpayOrder.id
+        status: 'created',
+        // Send temp data to frontend
+        tempData: {
+          cartId: cartId,
+          totalAmount: amount,
+          itemsCount: cart.items?.length || 0
+        }
       },
-      orderInfo: {
-        totalAmount: amount,
-        itemsCount: cart.items?.length || 0,
-        razorpayOrderId: razorpayOrder.id,
-        orderStatus: savedOrder.status,
-        b2cFlow: 'seller_to_warehouse_to_buyer'
+      paymentInfo: {
+        key: process.env.RAZORPAY_LIVE_KEY_ID,
+        name: "JustBecho",
+        description: "Order Payment",
+        order_id: razorpayOrder.id,
+        prefill: {
+          name: req.user.name || "Customer",
+          email: req.user.email || "",
+          contact: req.user.phone || ""
+        },
+        theme: {
+          color: "#F37254"
+        }
       }
     });
 
@@ -233,17 +162,125 @@ router.post('/create-order', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to create order: ' + error.message,
-      errorType: error.name,
-      troubleshooting: [
-        'Check if cart exists',
-        'Verify database connection',
-        'Check Razorpay API keys'
-      ]
+      errorType: error.name
     });
   }
 });
 
-// ✅ SIMPLE TEST ENDPOINT (No middleware issues)
+// ✅ CHECK PAYMENT STATUS
+router.get('/check-payment/:orderId', authMiddleware, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user.userId;
+    
+    console.log('🔍 Checking payment status for:', orderId);
+    
+    // Check if order exists in DB
+    const dbOrder = await Order.findOne({ 
+      razorpayOrderId: orderId,
+      user: userId 
+    });
+    
+    if (dbOrder) {
+      // Order already in DB (payment was successful)
+      console.log('✅ Order exists in DB:', dbOrder._id);
+      return res.json({
+        success: true,
+        orderExists: true,
+        order: {
+          id: dbOrder._id,
+          status: dbOrder.status,
+          totalAmount: dbOrder.totalAmount,
+          razorpayOrderId: dbOrder.razorpayOrderId,
+          createdAt: dbOrder.createdAt
+        },
+        message: 'Order already created'
+      });
+    }
+    
+    // Check with Razorpay API
+    try {
+      const razorpayOrder = await razorpay.orders.fetch(orderId);
+      console.log('📋 Razorpay order status:', razorpayOrder.status);
+      
+      if (razorpayOrder.status === 'paid') {
+        // Payment was successful but order not in DB
+        return res.json({
+          success: false,
+          orderExists: false,
+          paymentStatus: 'paid',
+          message: 'Payment successful but order not created. Please contact support.'
+        });
+      } else {
+        // Payment not completed
+        return res.json({
+          success: false,
+          orderExists: false,
+          paymentStatus: razorpayOrder.status,
+          message: 'Payment not completed'
+        });
+      }
+    } catch (razorpayError) {
+      console.error('❌ Razorpay fetch error:', razorpayError.message);
+      return res.json({
+        success: false,
+        orderExists: false,
+        message: 'Payment order not found in Razorpay'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Check payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// ✅ GET ORDER STATUS
+router.get('/order-status/:orderId', authMiddleware, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user.userId;
+    
+    const order = await Order.findOne({
+      _id: orderId,
+      user: userId
+    })
+    .select('_id status totalAmount razorpayOrderId razorpayPaymentId createdAt items shippingAddress');
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      order: {
+        id: order._id,
+        status: order.status,
+        totalAmount: order.totalAmount,
+        razorpayOrderId: order.razorpayOrderId,
+        razorpayPaymentId: order.razorpayPaymentId,
+        createdAt: order.createdAt,
+        itemsCount: order.items?.length || 0,
+        shippingAddress: order.shippingAddress
+      }
+    });
+    
+  } catch (error) {
+    console.error('Get order status error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// ✅ SIMPLE TEST ENDPOINT
 router.post('/create-order-test', authMiddleware, async (req, res) => {
   try {
     const { amount = 100, cartId } = req.body;
@@ -277,81 +314,20 @@ router.post('/create-order-test', authMiddleware, async (req, res) => {
       console.log('⚠️  Using mock test order');
     }
     
-    // Create minimal order
-    const orderData = {
-      user: userId,
-      cart: cartId,
-      totalAmount: amount,
-      razorpayOrderId: razorpayOrder.id,
-      status: 'pending',
-      buyer: userId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      metadata: {
-        cartItemsCount: 1,
-        shipmentMode: 'B2C',
-        autoForwardEnabled: true
-      }
-    };
-    
-    // Direct insert to avoid middleware
-    const db = mongoose.connection.db;
-    const result = await db.collection('orders').insertOne(orderData);
-    
-    console.log('✅ Test order saved with ID:', result.insertedId);
-    
     res.json({
       success: true,
-      message: 'Test order created successfully',
+      message: 'Test payment order created',
       order: {
         id: razorpayOrder.id,
         amount: razorpayOrder.amount,
         currency: razorpayOrder.currency,
-        databaseOrderId: result.insertedId
+        databaseOrderId: null, // No DB order yet
+        razorpayOrderId: razorpayOrder.id
       }
     });
     
   } catch (error) {
     console.error('Test order creation error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// ✅ GET ORDER STATUS
-router.get('/order-status/:orderId', authMiddleware, async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const userId = req.user.userId;
-    
-    const order = await Order.findOne({
-      _id: orderId,
-      user: userId
-    });
-    
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      order: {
-        id: order._id,
-        status: order.status,
-        totalAmount: order.totalAmount,
-        razorpayOrderId: order.razorpayOrderId,
-        createdAt: order.createdAt,
-        itemsCount: order.items?.length || 0
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get order status error:', error);
     res.status(500).json({
       success: false,
       message: error.message
