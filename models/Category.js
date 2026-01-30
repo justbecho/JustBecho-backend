@@ -1,4 +1,3 @@
-// models/Category.js - IMPROVED VERSION
 import mongoose from "mongoose";
 
 const categorySchema = new mongoose.Schema({
@@ -10,13 +9,15 @@ const categorySchema = new mongoose.Schema({
     index: true
   },
   
+  // ✅ FIX: Make slug NOT required or ensure auto-generation
   slug: {
     type: String,
-    required: [true, "Slug is required"],
+    // Remove required: true
     unique: true,
     lowercase: true,
     trim: true,
-    index: true
+    index: true,
+    default: ""  // Add default value
   },
   
   description: {
@@ -34,7 +35,6 @@ const categorySchema = new mongoose.Schema({
     default: ""
   },
   
-  // ✅ IMPROVED SUB-CATEGORIES STRUCTURE
   subCategories: [{
     title: {
       type: String,
@@ -59,7 +59,6 @@ const categorySchema = new mongoose.Schema({
     index: true
   },
   
-  // ✅ ADD THESE FIELDS FOR BETTER UX
   displayOrder: {
     type: Number,
     default: 0
@@ -84,19 +83,26 @@ const categorySchema = new mongoose.Schema({
   timestamps: true
 });
 
-// ✅ Create indexes for better performance
-categorySchema.index({ slug: 1, isActive: 1 });
-categorySchema.index({ isActive: 1, displayOrder: 1 });
-
-// ✅ Pre-save hook to generate slug if not provided
+// ✅ Improved pre-save hook
 categorySchema.pre('save', function(next) {
-  if (!this.slug) {
+  // Generate slug from name if not provided
+  if (!this.slug && this.name) {
     this.slug = this.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
   }
+  
+  // Ensure href is set if not provided
+  if (!this.href && this.slug) {
+    this.href = this.slug;
+  }
+  
   next();
 });
+
+// ✅ Create indexes
+categorySchema.index({ slug: 1, isActive: 1 });
+categorySchema.index({ isActive: 1, displayOrder: 1 });
 
 export default mongoose.model("Category", categorySchema);
