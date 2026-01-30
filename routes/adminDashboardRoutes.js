@@ -9,15 +9,14 @@ import Wishlist from "../models/Wishlist.js";
 
 const router = express.Router();
 
+// ========================
 // ✅ ADMIN AUTH MIDDLEWARE
+// ========================
 const adminAuth = async (req, res, next) => {
   try {
-    console.log('🔍 Admin auth middleware checking...');
-    
     const authHeader = req.headers.authorization;
     
     if (!authHeader) {
-      console.log('❌ No authorization header');
       return res.status(401).json({
         success: false,
         message: "No token provided"
@@ -27,11 +26,8 @@ const adminAuth = async (req, res, next) => {
     const token = authHeader.startsWith('Bearer ') 
       ? authHeader.split(' ')[1] 
       : authHeader;
-    
-    console.log('Token received:', token ? token.substring(0, 20) + '...' : 'No token');
 
     if (!token) {
-      console.log('❌ Token not found');
       return res.status(401).json({
         success: false,
         message: "No token, authorization denied"
@@ -39,16 +35,12 @@ const adminAuth = async (req, res, next) => {
     }
 
     const JWT_SECRET = process.env.JWT_SECRET || "supersecretjustbecho";
-    console.log('🔑 Using JWT_SECRET:', JWT_SECRET ? 'Set' : 'Not set');
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
-      console.log('✅ Token decoded:', decoded);
-      
       const user = await User.findById(decoded.userId);
       
       if (!user) {
-        console.log('❌ User not found for ID:', decoded.userId);
         return res.status(403).json({
           success: false,
           message: "Access denied. User not found."
@@ -56,19 +48,16 @@ const adminAuth = async (req, res, next) => {
       }
 
       if (user.role !== 'admin') {
-        console.log('❌ User is not admin. Role:', user.role);
         return res.status(403).json({
           success: false,
           message: "Access denied. Admin only."
         });
       }
 
-      console.log('✅ Admin authenticated:', user.email);
       req.user = user;
       next();
       
     } catch (jwtError) {
-      console.error('❌ JWT verification error:', jwtError.message);
       return res.status(401).json({
         success: false,
         message: "Invalid token: " + jwtError.message
@@ -76,7 +65,7 @@ const adminAuth = async (req, res, next) => {
     }
 
   } catch (error) {
-    console.error('❌ Auth middleware error:', error);
+    console.error('Auth middleware error:', error);
     res.status(500).json({
       success: false,
       message: "Server error in auth middleware"
@@ -92,8 +81,6 @@ router.use(adminAuth);
 // ========================
 router.get("/stats", async (req, res) => {
   try {
-    console.log('📊 Fetching dashboard stats for admin:', req.user.email);
-    
     const totalUsers = await User.countDocuments();
     const totalProducts = await Product.countDocuments();
     const totalOrders = await Order.countDocuments();
@@ -149,8 +136,6 @@ router.get("/stats", async (req, res) => {
     const totalSales = salesResult[0]?.totalSales || 0;
     const totalOrdersCount = salesResult[0]?.count || 0;
 
-    console.log('✅ Dashboard stats fetched successfully');
-
     res.json({
       success: true,
       message: "Dashboard stats fetched successfully",
@@ -188,7 +173,7 @@ router.get("/stats", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Dashboard stats error:', error);
+    console.error('Dashboard stats error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching stats: " + error.message
@@ -201,8 +186,6 @@ router.get("/stats", async (req, res) => {
 // ========================
 router.get("/users", async (req, res) => {
   try {
-    console.log('👥 Fetching users for admin:', req.user.email);
-    
     const { page = 1, limit = 20, search = '', role = '' } = req.query;
     const skip = (page - 1) * limit;
 
@@ -228,8 +211,6 @@ router.get("/users", async (req, res) => {
 
     const total = await User.countDocuments(query);
 
-    console.log(`✅ Found ${users.length} users`);
-
     res.json({
       success: true,
       message: "Users fetched successfully",
@@ -243,7 +224,7 @@ router.get("/users", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get users error:', error);
+    console.error('Get users error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching users: " + error.message
@@ -254,13 +235,11 @@ router.get("/users", async (req, res) => {
 router.get("/users/:id", async (req, res) => {
   try {
     const userId = req.params.id;
-    console.log('👤 Fetching user details for ID:', userId);
     
     const user = await User.findById(userId)
       .select('-password');
 
     if (!user) {
-      console.log('❌ User not found:', userId);
       return res.status(404).json({
         success: false,
         message: "User not found"
@@ -269,8 +248,6 @@ router.get("/users/:id", async (req, res) => {
 
     const products = await Product.find({ seller: user._id });
     const orders = await Order.find({ user: user._id });
-
-    console.log('✅ User details fetched:', user.email);
 
     res.json({
       success: true,
@@ -287,7 +264,7 @@ router.get("/users/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get user error:', error);
+    console.error('Get user error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching user details: " + error.message
@@ -299,8 +276,6 @@ router.put("/users/:id", async (req, res) => {
   try {
     const userId = req.params.id;
     const { name, email, phone, role, sellerVerified } = req.body;
-    
-    console.log('🔄 Updating user:', userId, req.body);
     
     const updateData = {};
     if (name) updateData.name = name;
@@ -322,8 +297,6 @@ router.put("/users/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ User updated:', user.email);
-
     res.json({
       success: true,
       message: "User updated successfully",
@@ -331,7 +304,7 @@ router.put("/users/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Update user error:', error);
+    console.error('Update user error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating user: " + error.message
@@ -342,7 +315,6 @@ router.put("/users/:id", async (req, res) => {
 router.delete("/users/:id", async (req, res) => {
   try {
     const userId = req.params.id;
-    console.log('🗑️  Deleting user:', userId);
     
     const user = await User.findById(userId);
     
@@ -366,15 +338,13 @@ router.delete("/users/:id", async (req, res) => {
     await Order.deleteMany({ user: user._id });
     await User.findByIdAndDelete(user._id);
 
-    console.log('✅ User deleted:', user.email);
-
     res.json({
       success: true,
       message: "User deleted successfully"
     });
 
   } catch (error) {
-    console.error('❌ Delete user error:', error);
+    console.error('Delete user error:', error);
     res.status(500).json({
       success: false,
       message: "Server error deleting user: " + error.message
@@ -387,8 +357,6 @@ router.delete("/users/:id", async (req, res) => {
 // ========================
 router.get("/products", async (req, res) => {
   try {
-    console.log('📦 Fetching products for admin:', req.user.email);
-    
     const { 
       page = 1, 
       limit = 20, 
@@ -422,8 +390,6 @@ router.get("/products", async (req, res) => {
 
     const total = await Product.countDocuments(query);
 
-    console.log(`✅ Found ${products.length} products`);
-
     res.json({
       success: true,
       message: "Products fetched successfully",
@@ -437,7 +403,7 @@ router.get("/products", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get products error:', error);
+    console.error('Get products error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching products: " + error.message
@@ -448,7 +414,6 @@ router.get("/products", async (req, res) => {
 router.get("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
-    console.log('📦 Fetching product details:', productId);
     
     const product = await Product.findById(productId)
       .populate('seller', 'name email phone address')
@@ -461,8 +426,6 @@ router.get("/products/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ Product details fetched:', product.productName);
-
     res.json({
       success: true,
       message: "Product details fetched successfully",
@@ -470,7 +433,7 @@ router.get("/products/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get product error:', error);
+    console.error('Get product error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching product: " + error.message
@@ -481,8 +444,6 @@ router.get("/products/:id", async (req, res) => {
 router.put("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
-    console.log('🔄 Updating product:', productId, req.body);
-    
     const { 
       productName, 
       brand, 
@@ -523,8 +484,6 @@ router.put("/products/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ Product updated:', product.productName);
-
     res.json({
       success: true,
       message: "Product updated successfully",
@@ -532,7 +491,7 @@ router.put("/products/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Update product error:', error);
+    console.error('Update product error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating product: " + error.message
@@ -543,7 +502,6 @@ router.put("/products/:id", async (req, res) => {
 router.delete("/products/:id", async (req, res) => {
   try {
     const productId = req.params.id;
-    console.log('🗑️  Deleting product:', productId);
     
     const product = await Product.findById(productId);
     
@@ -566,15 +524,13 @@ router.delete("/products/:id", async (req, res) => {
 
     await Product.findByIdAndDelete(productId);
 
-    console.log('✅ Product deleted:', product.productName);
-
     res.json({
       success: true,
       message: "Product deleted successfully"
     });
 
   } catch (error) {
-    console.error('❌ Delete product error:', error);
+    console.error('Delete product error:', error);
     res.status(500).json({
       success: false,
       message: "Server error deleting product: " + error.message
@@ -587,8 +543,6 @@ router.delete("/products/:id", async (req, res) => {
 // ========================
 router.get("/orders", async (req, res) => {
   try {
-    console.log('🛒 Fetching orders for admin:', req.user.email);
-    
     const { 
       page = 1, 
       limit = 20, 
@@ -629,8 +583,6 @@ router.get("/orders", async (req, res) => {
 
     const total = await Order.countDocuments(query);
 
-    console.log(`✅ Found ${orders.length} orders`);
-
     res.json({
       success: true,
       message: "Orders fetched successfully",
@@ -644,7 +596,7 @@ router.get("/orders", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get orders error:', error);
+    console.error('Get orders error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching orders: " + error.message
@@ -655,7 +607,6 @@ router.get("/orders", async (req, res) => {
 router.get("/orders/:id", async (req, res) => {
   try {
     const orderId = req.params.id;
-    console.log('🛒 Fetching order details:', orderId);
     
     const order = await Order.findById(orderId)
       .populate('user', 'name email phone address')
@@ -669,8 +620,6 @@ router.get("/orders/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ Order details fetched:', order._id);
-
     res.json({
       success: true,
       message: "Order details fetched successfully",
@@ -678,7 +627,7 @@ router.get("/orders/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get order error:', error);
+    console.error('Get order error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching order: " + error.message
@@ -690,8 +639,6 @@ router.put("/orders/:id/status", async (req, res) => {
   try {
     const orderId = req.params.id;
     const { status } = req.body;
-    
-    console.log('🔄 Updating order status:', orderId, status);
     
     if (!status) {
       return res.status(400).json({
@@ -737,8 +684,6 @@ router.put("/orders/:id/status", async (req, res) => {
 
     await order.save();
 
-    console.log('✅ Order status updated:', orderId, 'to', status);
-
     res.json({
       success: true,
       message: "Order status updated successfully",
@@ -746,7 +691,7 @@ router.put("/orders/:id/status", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Update order status error:', error);
+    console.error('Update order status error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating order status: " + error.message
@@ -759,8 +704,6 @@ router.put("/orders/:id/status", async (req, res) => {
 // ========================
 router.get("/categories", async (req, res) => {
   try {
-    console.log('📁 Fetching categories for admin:', req.user.email);
-    
     const { search = '' } = req.query;
     
     let query = {};
@@ -775,8 +718,6 @@ router.get("/categories", async (req, res) => {
     const categories = await Category.find(query)
       .sort({ name: 1 });
 
-    console.log(`✅ Found ${categories.length} categories`);
-
     res.json({
       success: true,
       message: "Categories fetched successfully",
@@ -784,7 +725,7 @@ router.get("/categories", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get categories error:', error);
+    console.error('Get categories error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching categories: " + error.message
@@ -795,7 +736,6 @@ router.get("/categories", async (req, res) => {
 router.get("/categories/:id", async (req, res) => {
   try {
     const categoryId = req.params.id;
-    console.log('📁 Fetching category details:', categoryId);
     
     const category = await Category.findById(categoryId);
 
@@ -806,8 +746,6 @@ router.get("/categories/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ Category details fetched:', category.name);
-
     res.json({
       success: true,
       message: "Category details fetched successfully",
@@ -815,7 +753,7 @@ router.get("/categories/:id", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get category error:', error);
+    console.error('Get category error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching category: " + error.message
@@ -826,10 +764,8 @@ router.get("/categories/:id", async (req, res) => {
 router.post("/categories", async (req, res) => {
   try {
     const { name, description, image, href, isActive = true, subCategories = [] } = req.body;
-    
-    console.log('➕ Creating category:', name, req.body);
 
-    if (!name) {
+    if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
         message: "Category name is required"
@@ -847,18 +783,20 @@ router.post("/categories", async (req, res) => {
       });
     }
 
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const finalHref = href || slug;
+
     const category = new Category({
-      name,
-      description,
-      image,
-      href: href || name.toLowerCase().replace(/\s+/g, '-'),
+      name: name.trim(),
+      description: description || '',
+      image: image || '',
+      slug: slug,
+      href: finalHref,
       isActive,
-      subCategories
+      subCategories: subCategories || []
     });
 
-    await category.save();
-
-    console.log('✅ Category created:', category.name);
+    await category.save({ validateBeforeSave: false });
 
     res.status(201).json({
       success: true,
@@ -867,7 +805,7 @@ router.post("/categories", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Create category error:', error);
+    console.error('Create category error:', error);
     res.status(500).json({
       success: false,
       message: "Server error creating category: " + error.message
@@ -879,22 +817,9 @@ router.put("/categories/:id", async (req, res) => {
   try {
     const categoryId = req.params.id;
     const { name, description, image, href, isActive, subCategories } = req.body;
+
+    const category = await Category.findById(categoryId);
     
-    console.log('🔄 Updating category:', categoryId, req.body);
-
-    const category = await Category.findByIdAndUpdate(
-      categoryId,
-      {
-        name,
-        description,
-        image,
-        href,
-        isActive,
-        subCategories
-      },
-      { new: true, runValidators: true }
-    );
-
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -902,16 +827,32 @@ router.put("/categories/:id", async (req, res) => {
       });
     }
 
-    console.log('✅ Category updated:', category.name);
+    const updateData = {};
+    if (name && name.trim()) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description;
+    if (image !== undefined) updateData.image = image;
+    if (href !== undefined) updateData.href = href;
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (subCategories !== undefined) updateData.subCategories = subCategories;
+
+    if (name && name.trim() !== category.name) {
+      updateData.slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    }
+
+    const updatedCategory = await Category.findByIdAndUpdate(
+      categoryId,
+      updateData,
+      { new: true, runValidators: false }
+    );
 
     res.json({
       success: true,
       message: "Category updated successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
-    console.error('❌ Update category error:', error);
+    console.error('Update category error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating category: " + error.message
@@ -922,7 +863,6 @@ router.put("/categories/:id", async (req, res) => {
 router.delete("/categories/:id", async (req, res) => {
   try {
     const categoryId = req.params.id;
-    console.log('🗑️  Deleting category:', categoryId);
     
     const category = await Category.findById(categoryId);
     
@@ -946,15 +886,13 @@ router.delete("/categories/:id", async (req, res) => {
 
     await Category.findByIdAndDelete(categoryId);
 
-    console.log('✅ Category deleted:', category.name);
-
     res.json({
       success: true,
       message: "Category deleted successfully"
     });
 
   } catch (error) {
-    console.error('❌ Delete category error:', error);
+    console.error('Delete category error:', error);
     res.status(500).json({
       success: false,
       message: "Server error deleting category: " + error.message
@@ -963,14 +901,13 @@ router.delete("/categories/:id", async (req, res) => {
 });
 
 // ========================
-// 📁 SUBCATEGORY MANAGEMENT
+// 📁 SUBCATEGORY MANAGEMENT - FIXED
 // ========================
 
 // GET SUB-CATEGORIES FOR A CATEGORY
 router.get("/categories/:categoryId/subcategories", async (req, res) => {
   try {
     const { categoryId } = req.params;
-    console.log('📁 Fetching subcategories for category:', categoryId);
     
     const category = await Category.findById(categoryId);
     
@@ -988,7 +925,7 @@ router.get("/categories/:categoryId/subcategories", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get subcategories error:', error);
+    console.error('Get subcategories error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching subcategories: " + error.message
@@ -996,21 +933,27 @@ router.get("/categories/:categoryId/subcategories", async (req, res) => {
   }
 });
 
-// ADD SUB-CATEGORY TO CATEGORY
+// ADD SUB-CATEGORY TO CATEGORY - FIXED VERSION
 router.post("/categories/:categoryId/subcategories", async (req, res) => {
   try {
     const { categoryId } = req.params;
     const { title, slug, items = [] } = req.body;
     
-    console.log('➕ Adding subcategory to category:', categoryId, req.body);
-
-    if (!title || !slug) {
+    if (!title || !title.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Title and slug are required for subcategory"
+        message: "Subcategory title is required"
       });
     }
 
+    if (!slug || !slug.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Subcategory slug is required"
+      });
+    }
+
+    // Find category and update slug if missing
     const category = await Category.findById(categoryId);
     
     if (!category) {
@@ -1020,8 +963,26 @@ router.post("/categories/:categoryId/subcategories", async (req, res) => {
       });
     }
 
-    const existingSubcategory = category.subCategories.find(
-      sub => sub.slug.toLowerCase() === slug.toLowerCase()
+    // Ensure main category has slug
+    if (!category.slug || category.slug.trim() === '') {
+      const generatedSlug = category.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      
+      await Category.findByIdAndUpdate(
+        categoryId,
+        { 
+          slug: generatedSlug,
+          href: category.href || generatedSlug
+        },
+        { runValidators: false }
+      );
+    }
+
+    // Check if subcategory already exists
+    const existingSubcategory = (category.subCategories || []).find(
+      sub => sub.slug && sub.slug.toLowerCase() === slug.toLowerCase().trim()
     );
 
     if (existingSubcategory) {
@@ -1031,25 +992,30 @@ router.post("/categories/:categoryId/subcategories", async (req, res) => {
       });
     }
 
-    category.subCategories = category.subCategories || [];
-    category.subCategories.push({
-      title,
-      slug: slug.toLowerCase(),
-      items: items || []
-    });
+    // Create new subcategory
+    const newSubcategory = {
+      title: title.trim(),
+      slug: slug.toLowerCase().trim(),
+      items: Array.isArray(items) ? items.filter(item => item && item.trim()) : []
+    };
 
-    await category.save();
-
-    console.log('✅ Subcategory added to:', category.name);
+    // Add subcategory using $push
+    const updatedCategory = await Category.findByIdAndUpdate(
+      categoryId,
+      {
+        $push: { subCategories: newSubcategory }
+      },
+      { new: true, runValidators: false }
+    );
 
     res.status(201).json({
       success: true,
       message: "Subcategory added successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
-    console.error('❌ Add subcategory error:', error);
+    console.error('Add subcategory error:', error);
     res.status(500).json({
       success: false,
       message: "Server error adding subcategory: " + error.message
@@ -1063,7 +1029,12 @@ router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) =>
     const { categoryId, subSlug } = req.params;
     const { title, newSlug, items } = req.body;
     
-    console.log('🔄 Updating subcategory:', categoryId, subSlug, req.body);
+    if (!title && !newSlug && items === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "No update data provided"
+      });
+    }
 
     const category = await Category.findById(categoryId);
     
@@ -1074,7 +1045,7 @@ router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) =>
       });
     }
 
-    const subIndex = category.subCategories.findIndex(
+    const subIndex = (category.subCategories || []).findIndex(
       sub => sub.slug === subSlug
     );
 
@@ -1085,22 +1056,33 @@ router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) =>
       });
     }
 
-    if (title) category.subCategories[subIndex].title = title;
-    if (newSlug) category.subCategories[subIndex].slug = newSlug.toLowerCase();
-    if (items !== undefined) category.subCategories[subIndex].items = items;
+    // Build update object
+    const updateObj = {};
+    if (title && title.trim()) {
+      updateObj[`subCategories.${subIndex}.title`] = title.trim();
+    }
+    if (newSlug && newSlug.trim()) {
+      updateObj[`subCategories.${subIndex}.slug`] = newSlug.toLowerCase().trim();
+    }
+    if (items !== undefined) {
+      updateObj[`subCategories.${subIndex}.items`] = 
+        Array.isArray(items) ? items.filter(item => item && item.trim()) : [];
+    }
 
-    await category.save();
-
-    console.log('✅ Subcategory updated');
+    const updatedCategory = await Category.findByIdAndUpdate(
+      categoryId,
+      { $set: updateObj },
+      { new: true, runValidators: false }
+    );
 
     res.json({
       success: true,
       message: "Subcategory updated successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
-    console.error('❌ Update subcategory error:', error);
+    console.error('Update subcategory error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating subcategory: " + error.message
@@ -1112,7 +1094,6 @@ router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) =>
 router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res) => {
   try {
     const { categoryId, subSlug } = req.params;
-    console.log('🗑️  Deleting subcategory:', categoryId, subSlug);
     
     const category = await Category.findById(categoryId);
     
@@ -1123,21 +1104,20 @@ router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res)
       });
     }
 
-    const initialLength = category.subCategories.length;
-    category.subCategories = category.subCategories.filter(
-      sub => sub.slug !== subSlug
+    const subIndex = (category.subCategories || []).findIndex(
+      sub => sub.slug === subSlug
     );
 
-    if (category.subCategories.length === initialLength) {
+    if (subIndex === -1) {
       return res.status(404).json({
         success: false,
         message: "Subcategory not found"
       });
     }
 
-    await category.save();
-
-    console.log('✅ Subcategory deleted from:', category.name);
+    // Remove the subcategory
+    category.subCategories.splice(subIndex, 1);
+    await category.save({ validateBeforeSave: false });
 
     res.json({
       success: true,
@@ -1146,7 +1126,7 @@ router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res)
     });
 
   } catch (error) {
-    console.error('❌ Delete subcategory error:', error);
+    console.error('Delete subcategory error:', error);
     res.status(500).json({
       success: false,
       message: "Server error deleting subcategory: " + error.message
@@ -1160,8 +1140,6 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
     const { categoryId, subSlug } = req.params;
     const { item } = req.body;
     
-    console.log('➕ Adding item to subcategory:', categoryId, subSlug, item);
-
     if (!item || !item.trim()) {
       return res.status(400).json({
         success: false,
@@ -1178,7 +1156,7 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
       });
     }
 
-    const subIndex = category.subCategories.findIndex(
+    const subIndex = (category.subCategories || []).findIndex(
       sub => sub.slug === subSlug
     );
 
@@ -1189,12 +1167,11 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
       });
     }
 
+    // Add item if not exists
     if (!category.subCategories[subIndex].items.includes(item.trim())) {
       category.subCategories[subIndex].items.push(item.trim());
-      await category.save();
+      await category.save({ validateBeforeSave: false });
     }
-
-    console.log('✅ Item added to subcategory');
 
     res.json({
       success: true,
@@ -1203,7 +1180,7 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
     });
 
   } catch (error) {
-    console.error('❌ Add item error:', error);
+    console.error('Add item error:', error);
     res.status(500).json({
       success: false,
       message: "Server error adding item: " + error.message
@@ -1215,7 +1192,6 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
 router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", async (req, res) => {
   try {
     const { categoryId, subSlug, item } = req.params;
-    console.log('🗑️  Removing item from subcategory:', categoryId, subSlug, item);
     
     const category = await Category.findById(categoryId);
     
@@ -1226,7 +1202,7 @@ router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", asyn
       });
     }
 
-    const subIndex = category.subCategories.findIndex(
+    const subIndex = (category.subCategories || []).findIndex(
       sub => sub.slug === subSlug
     );
 
@@ -1237,12 +1213,12 @@ router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", asyn
       });
     }
 
+    // Remove item
+    const decodedItem = decodeURIComponent(item);
     category.subCategories[subIndex].items = 
-      category.subCategories[subIndex].items.filter(i => i !== decodeURIComponent(item));
+      category.subCategories[subIndex].items.filter(i => i !== decodedItem);
 
-    await category.save();
-
-    console.log('✅ Item removed from subcategory');
+    await category.save({ validateBeforeSave: false });
 
     res.json({
       success: true,
@@ -1251,10 +1227,67 @@ router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", asyn
     });
 
   } catch (error) {
-    console.error('❌ Remove item error:', error);
+    console.error('Remove item error:', error);
     res.status(500).json({
       success: false,
       message: "Server error removing item: " + error.message
+    });
+  }
+});
+
+// ========================
+// 🛠️ FIX CATEGORY SLUGS
+// ========================
+router.post("/fix-category-slugs", async (req, res) => {
+  try {
+    const categories = await Category.find();
+    let updatedCount = 0;
+    
+    for (const category of categories) {
+      let needsUpdate = false;
+      const updates = {};
+      
+      // Fix slug
+      if (!category.slug || category.slug.trim() === '') {
+        if (category.name) {
+          updates.slug = category.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
+          needsUpdate = true;
+        }
+      }
+      
+      // Fix href
+      if (!category.href || category.href.trim() === '') {
+        updates.href = updates.slug || category.slug || category.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, '');
+        needsUpdate = true;
+      }
+      
+      if (needsUpdate) {
+        await Category.findByIdAndUpdate(
+          category._id, 
+          updates,
+          { runValidators: false }
+        );
+        updatedCount++;
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Fixed ${updatedCount} categories`,
+      updatedCount
+    });
+    
+  } catch (error) {
+    console.error('Fix category slugs error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fixing slugs: " + error.message
     });
   }
 });
@@ -1265,9 +1298,6 @@ router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", asyn
 router.get("/sales-report", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
-    console.log('📈 Generating sales report for admin:', req.user.email);
-    console.log('Date range:', startDate, 'to', endDate);
     
     let dateFilter = {};
     
@@ -1335,8 +1365,6 @@ router.get("/sales-report", async (req, res) => {
     const totalSales = salesData.reduce((sum, item) => sum + item.totalSales, 0);
     const totalOrders = salesData.reduce((sum, item) => sum + item.orderCount, 0);
 
-    console.log('✅ Sales report generated');
-
     res.json({
       success: true,
       message: "Sales report generated successfully",
@@ -1357,7 +1385,7 @@ router.get("/sales-report", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Sales report error:', error);
+    console.error('Sales report error:', error);
     res.status(500).json({
       success: false,
       message: "Server error generating sales report: " + error.message
@@ -1369,8 +1397,6 @@ router.get("/sales-report", async (req, res) => {
 // 🏥 HEALTH CHECK
 // ========================
 router.get("/health", (req, res) => {
-  console.log('🏥 Admin health check requested by:', req.user.email);
-  
   res.json({
     success: true,
     message: "Admin dashboard API is healthy",
@@ -1380,14 +1406,6 @@ router.get("/health", (req, res) => {
       name: req.user.name,
       role: req.user.role,
       id: req.user._id
-    },
-    endpoints: {
-      stats: "GET /api/admin/dashboard/stats",
-      users: "GET /api/admin/dashboard/users",
-      products: "GET /api/admin/dashboard/products",
-      orders: "GET /api/admin/dashboard/orders",
-      categories: "GET /api/admin/dashboard/categories",
-      sales: "GET /api/admin/dashboard/sales-report"
     }
   });
 });
@@ -1397,8 +1415,6 @@ router.get("/health", (req, res) => {
 // ========================
 router.get("/summary", async (req, res) => {
   try {
-    console.log('📊 Fetching dashboard summary for admin:', req.user.email);
-    
     const today = new Date();
     const startOfToday = new Date(today.setHours(0, 0, 0, 0));
     const endOfToday = new Date(today.setHours(23, 59, 59, 999));
@@ -1469,8 +1485,6 @@ router.get("/summary", async (req, res) => {
       sellerVerified: false 
     });
 
-    console.log('✅ Dashboard summary fetched');
-
     res.json({
       success: true,
       message: "Dashboard summary fetched successfully",
@@ -1504,7 +1518,7 @@ router.get("/summary", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Dashboard summary error:', error);
+    console.error('Dashboard summary error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching dashboard summary: " + error.message
@@ -1517,14 +1531,11 @@ router.get("/summary", async (req, res) => {
 // ========================
 router.get("/analytics", async (req, res) => {
   try {
-    console.log('📊 Fetching website analytics for admin:', req.user.email);
-    
     const { days = 30 } = req.query;
     
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
     
-    // Daily user registrations
     const dailyRegistrations = await User.aggregate([
       {
         $match: {
@@ -1546,7 +1557,6 @@ router.get("/analytics", async (req, res) => {
       }
     ]);
     
-    // Daily orders
     const dailyOrders = await Order.aggregate([
       {
         $match: {
@@ -1569,7 +1579,6 @@ router.get("/analytics", async (req, res) => {
       }
     ]);
     
-    // Category-wise product count
     const categoryStats = await Product.aggregate([
       {
         $group: {
@@ -1586,7 +1595,6 @@ router.get("/analytics", async (req, res) => {
       }
     ]);
     
-    // Top selling products
     const topSellingProducts = await Product.aggregate([
       {
         $match: {
@@ -1607,8 +1615,6 @@ router.get("/analytics", async (req, res) => {
         $limit: 10
       }
     ]);
-
-    console.log('✅ Website analytics fetched');
 
     res.json({
       success: true,
@@ -1641,7 +1647,7 @@ router.get("/analytics", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Analytics error:', error);
+    console.error('Analytics error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching analytics: " + error.message
@@ -1656,8 +1662,6 @@ router.post("/bulk/update-product-status", async (req, res) => {
   try {
     const { productIds, status } = req.body;
     
-    console.log('🚀 Bulk updating product status:', productIds.length, 'products to', status);
-
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({
         success: false,
@@ -1685,8 +1689,6 @@ router.post("/bulk/update-product-status", async (req, res) => {
       { $set: { status: status } }
     );
 
-    console.log('✅ Bulk update completed:', result.modifiedCount, 'products updated');
-
     res.json({
       success: true,
       message: `Updated ${result.modifiedCount} products to ${status}`,
@@ -1694,7 +1696,7 @@ router.post("/bulk/update-product-status", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Bulk update error:', error);
+    console.error('Bulk update error:', error);
     res.status(500).json({
       success: false,
       message: "Server error in bulk operation: " + error.message
@@ -1706,8 +1708,6 @@ router.post("/bulk/delete-products", async (req, res) => {
   try {
     const { productIds } = req.body;
     
-    console.log('🚀 Bulk deleting products:', productIds?.length, 'products');
-
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({
         success: false,
@@ -1717,8 +1717,6 @@ router.post("/bulk/delete-products", async (req, res) => {
 
     const result = await Product.deleteMany({ _id: { $in: productIds } });
 
-    console.log('✅ Bulk delete completed:', result.deletedCount, 'products deleted');
-
     res.json({
       success: true,
       message: `Deleted ${result.deletedCount} products`,
@@ -1726,7 +1724,7 @@ router.post("/bulk/delete-products", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Bulk delete error:', error);
+    console.error('Bulk delete error:', error);
     res.status(500).json({
       success: false,
       message: "Server error in bulk delete: " + error.message
@@ -1739,28 +1737,21 @@ router.post("/bulk/delete-products", async (req, res) => {
 // ========================
 router.get("/activity-log", async (req, res) => {
   try {
-    console.log('📋 Fetching activity log for admin:', req.user.email);
-    
-    const { page = 1, limit = 50, type = '' } = req.query;
+    const { page = 1, limit = 50 } = req.query;
     const skip = (page - 1) * limit;
 
-    let logs = [];
-    
-    // Get user activity
     const userActivity = await User.find()
       .select('name email role lastLogin createdAt')
       .sort({ lastLogin: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Get product activity
     const productActivity = await Product.find()
       .select('productName status createdAt updatedAt')
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Get order activity
     const orderActivity = await Order.find()
       .select('status totalAmount createdAt')
       .populate('user', 'name email')
@@ -1768,7 +1759,7 @@ router.get("/activity-log", async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    logs = [
+    let logs = [
       ...userActivity.map(u => ({
         type: 'user',
         action: u.lastLogin ? 'login' : 'created',
@@ -1798,8 +1789,6 @@ router.get("/activity-log", async (req, res) => {
 
     logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    console.log('✅ Activity log fetched:', logs.length, 'entries');
-
     res.json({
       success: true,
       message: "Activity log fetched successfully",
@@ -1813,7 +1802,7 @@ router.get("/activity-log", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Activity log error:', error);
+    console.error('Activity log error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching activity log: " + error.message
@@ -1826,10 +1815,6 @@ router.get("/activity-log", async (req, res) => {
 // ========================
 router.get("/settings", async (req, res) => {
   try {
-    console.log('🔐 Fetching admin settings for:', req.user.email);
-    
-    // In a real app, you'd have a Settings model
-    // For now, return some default settings
     const settings = {
       siteName: "Just Becho",
       siteUrl: "https://justbecho.com",
@@ -1849,15 +1834,8 @@ router.get("/settings", async (req, res) => {
         orderNotifications: true,
         userNotifications: true,
         productNotifications: true
-      },
-      seoSettings: {
-        metaTitle: "Just Becho - Buy & Sell Pre-loved Fashion",
-        metaDescription: "Sustainable fashion marketplace for buying and selling pre-loved clothing and accessories.",
-        keywords: "sustainable fashion, pre-loved, second-hand, buy, sell, clothing, accessories"
       }
     };
-
-    console.log('✅ Admin settings fetched');
 
     res.json({
       success: true,
@@ -1866,7 +1844,7 @@ router.get("/settings", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Settings error:', error);
+    console.error('Settings error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching settings: " + error.message
@@ -1876,23 +1854,14 @@ router.get("/settings", async (req, res) => {
 
 router.put("/settings", async (req, res) => {
   try {
-    console.log('🔐 Updating admin settings by:', req.user.email);
-    
-    // In a real app, you'd save to a Settings model
-    // For now, just validate and return success
     const settings = req.body;
     
-    console.log('Updated settings:', settings);
-
-    // Validate required fields
     if (!settings.siteName || !settings.currency) {
       return res.status(400).json({
         success: false,
         message: "Site name and currency are required"
       });
     }
-
-    console.log('✅ Admin settings updated');
 
     res.json({
       success: true,
@@ -1901,7 +1870,7 @@ router.put("/settings", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Update settings error:', error);
+    console.error('Update settings error:', error);
     res.status(500).json({
       success: false,
       message: "Server error updating settings: " + error.message
@@ -1914,9 +1883,6 @@ router.put("/settings", async (req, res) => {
 // ========================
 router.get("/notifications", async (req, res) => {
   try {
-    console.log('📧 Fetching notifications for admin:', req.user.email);
-    
-    // Get pending approvals
     const pendingProducts = await Product.countDocuments({ status: 'pending' });
     const pendingSellers = await User.countDocuments({ 
       role: 'seller', 
@@ -1924,7 +1890,6 @@ router.get("/notifications", async (req, res) => {
     });
     const pendingOrders = await Order.countDocuments({ status: 'pending' });
 
-    // Get recent activities
     const recentUsers = await User.find()
       .sort({ createdAt: -1 })
       .limit(5)
@@ -1973,8 +1938,6 @@ router.get("/notifications", async (req, res) => {
       }))
     ];
 
-    console.log('✅ Notifications fetched:', notifications.length);
-
     res.json({
       success: true,
       message: "Notifications fetched successfully",
@@ -1988,10 +1951,104 @@ router.get("/notifications", async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Notifications error:', error);
+    console.error('Notifications error:', error);
     res.status(500).json({
       success: false,
       message: "Server error fetching notifications: " + error.message
+    });
+  }
+});
+
+// ========================
+// 📁 CATEGORY BULK OPERATIONS
+// ========================
+router.post("/bulk/update-category-status", async (req, res) => {
+  try {
+    const { categoryIds, isActive } = req.body;
+    
+    if (!categoryIds || !Array.isArray(categoryIds) || categoryIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Category IDs array is required"
+      });
+    }
+
+    if (isActive === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required"
+      });
+    }
+
+    const result = await Category.updateMany(
+      { _id: { $in: categoryIds } },
+      { $set: { isActive: isActive } }
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${result.modifiedCount} categories to ${isActive ? 'active' : 'inactive'}`,
+      modifiedCount: result.modifiedCount
+    });
+
+  } catch (error) {
+    console.error('Bulk category update error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error in bulk category operation: " + error.message
+    });
+  }
+});
+
+router.post("/bulk/delete-categories", async (req, res) => {
+  try {
+    const { categoryIds } = req.body;
+    
+    if (!categoryIds || !Array.isArray(categoryIds) || categoryIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Category IDs array is required"
+      });
+    }
+
+    // Check if any category has products
+    const categories = await Category.find({ _id: { $in: categoryIds } });
+    const categoriesWithProducts = [];
+    
+    for (const category of categories) {
+      const productCount = await Product.countDocuments({
+        category: { $regex: new RegExp(`^${category.name}$`, 'i') }
+      });
+      
+      if (productCount > 0) {
+        categoriesWithProducts.push({
+          name: category.name,
+          productCount: productCount
+        });
+      }
+    }
+    
+    if (categoriesWithProducts.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete categories with products",
+        categoriesWithProducts
+      });
+    }
+
+    const result = await Category.deleteMany({ _id: { $in: categoryIds } });
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} categories`,
+      deletedCount: result.deletedCount
+    });
+
+  } catch (error) {
+    console.error('Bulk delete categories error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error in bulk delete categories: " + error.message
     });
   }
 });
