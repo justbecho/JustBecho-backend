@@ -711,7 +711,8 @@ router.get("/categories", async (req, res) => {
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { description: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -901,7 +902,7 @@ router.delete("/categories/:id", async (req, res) => {
 });
 
 // ========================
-// 📁 SUBCATEGORY MANAGEMENT - FIXED
+// 📁 SUBCATEGORY MANAGEMENT - COMPLETE WORKING
 // ========================
 
 // GET SUB-CATEGORIES FOR A CATEGORY
@@ -933,7 +934,7 @@ router.get("/categories/:categoryId/subcategories", async (req, res) => {
   }
 });
 
-// ADD SUB-CATEGORY TO CATEGORY - FIXED VERSION
+// ADD SUB-CATEGORY TO CATEGORY - WORKING
 router.post("/categories/:categoryId/subcategories", async (req, res) => {
   try {
     const { categoryId } = req.params;
@@ -953,7 +954,6 @@ router.post("/categories/:categoryId/subcategories", async (req, res) => {
       });
     }
 
-    // Find category and update slug if missing
     const category = await Category.findById(categoryId);
     
     if (!category) {
@@ -1023,7 +1023,7 @@ router.post("/categories/:categoryId/subcategories", async (req, res) => {
   }
 });
 
-// UPDATE SUB-CATEGORY
+// UPDATE SUB-CATEGORY - WORKING
 router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) => {
   try {
     const { categoryId, subSlug } = req.params;
@@ -1090,11 +1090,12 @@ router.put("/categories/:categoryId/subcategories/:subSlug", async (req, res) =>
   }
 });
 
-// DELETE SUB-CATEGORY
+// ✅ DELETE SUB-CATEGORY - WORKING
 router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res) => {
   try {
     const { categoryId, subSlug } = req.params;
     
+    // First, check if category exists
     const category = await Category.findById(categoryId);
     
     if (!category) {
@@ -1104,25 +1105,43 @@ router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res)
       });
     }
 
-    const subIndex = (category.subCategories || []).findIndex(
+    // Check if subcategory exists
+    const subExists = (category.subCategories || []).some(
       sub => sub.slug === subSlug
     );
 
-    if (subIndex === -1) {
+    if (!subExists) {
       return res.status(404).json({
         success: false,
         message: "Subcategory not found"
       });
     }
 
-    // Remove the subcategory
-    category.subCategories.splice(subIndex, 1);
-    await category.save({ validateBeforeSave: false });
+    // Use $pull to remove the subcategory
+    const updatedCategory = await Category.findByIdAndUpdate(
+      categoryId,
+      {
+        $pull: {
+          subCategories: { slug: subSlug }
+        }
+      },
+      { 
+        new: true,
+        runValidators: false 
+      }
+    );
+
+    if (!updatedCategory) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update category"
+      });
+    }
 
     res.json({
       success: true,
       message: "Subcategory deleted successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
@@ -1134,7 +1153,7 @@ router.delete("/categories/:categoryId/subcategories/:subSlug", async (req, res)
   }
 });
 
-// ADD ITEM TO SUB-CATEGORY
+// ADD ITEM TO SUB-CATEGORY - WORKING
 router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, res) => {
   try {
     const { categoryId, subSlug } = req.params;
@@ -1147,6 +1166,7 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
       });
     }
 
+    // Find category
     const category = await Category.findById(categoryId);
     
     if (!category) {
@@ -1167,16 +1187,26 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
       });
     }
 
-    // Add item if not exists
+    // Check if item already exists
     if (!category.subCategories[subIndex].items.includes(item.trim())) {
-      category.subCategories[subIndex].items.push(item.trim());
-      await category.save({ validateBeforeSave: false });
+      // Update using array notation
+      const updateObj = {};
+      updateObj[`subCategories.${subIndex}.items`] = [...category.subCategories[subIndex].items, item.trim()];
+      
+      await Category.findByIdAndUpdate(
+        categoryId,
+        { $set: updateObj },
+        { runValidators: false }
+      );
     }
+
+    // Fetch updated category
+    const updatedCategory = await Category.findById(categoryId);
 
     res.json({
       success: true,
       message: "Item added to subcategory successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
@@ -1188,11 +1218,12 @@ router.post("/categories/:categoryId/subcategories/:subSlug/items", async (req, 
   }
 });
 
-// REMOVE ITEM FROM SUB-CATEGORY
+// DELETE ITEM FROM SUB-CATEGORY - WORKING
 router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", async (req, res) => {
   try {
     const { categoryId, subSlug, item } = req.params;
     
+    // Find category
     const category = await Category.findById(categoryId);
     
     if (!category) {
@@ -1213,17 +1244,31 @@ router.delete("/categories/:categoryId/subcategories/:subSlug/items/:item", asyn
       });
     }
 
-    // Remove item
+    // Decode item name (it's URL encoded)
     const decodedItem = decodeURIComponent(item);
-    category.subCategories[subIndex].items = 
-      category.subCategories[subIndex].items.filter(i => i !== decodedItem);
+    
+    // Filter out the item
+    const updatedItems = category.subCategories[subIndex].items.filter(
+      i => i !== decodedItem
+    );
 
-    await category.save({ validateBeforeSave: false });
+    // Update using array notation
+    const updateObj = {};
+    updateObj[`subCategories.${subIndex}.items`] = updatedItems;
+    
+    const updatedCategory = await Category.findByIdAndUpdate(
+      categoryId,
+      { $set: updateObj },
+      { 
+        new: true,
+        runValidators: false 
+      }
+    );
 
     res.json({
       success: true,
       message: "Item removed from subcategory successfully",
-      category
+      category: updatedCategory
     });
 
   } catch (error) {
@@ -1247,7 +1292,6 @@ router.post("/fix-category-slugs", async (req, res) => {
       let needsUpdate = false;
       const updates = {};
       
-      // Fix slug
       if (!category.slug || category.slug.trim() === '') {
         if (category.name) {
           updates.slug = category.name
@@ -1258,7 +1302,6 @@ router.post("/fix-category-slugs", async (req, res) => {
         }
       }
       
-      // Fix href
       if (!category.href || category.href.trim() === '') {
         updates.href = updates.slug || category.slug || category.name
           .toLowerCase()
@@ -2011,7 +2054,6 @@ router.post("/bulk/delete-categories", async (req, res) => {
       });
     }
 
-    // Check if any category has products
     const categories = await Category.find({ _id: { $in: categoryIds } });
     const categoriesWithProducts = [];
     
